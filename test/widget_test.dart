@@ -8,8 +8,10 @@ void main() {
     expect(find.text('UTRGV-GO'), findsOneWidget);
     await tester.tap(find.text('Get started'));
     await tester.pumpAndSettle();
-    expect(find.text('School email'), findsOneWidget);
-    Navigator.of(tester.element(find.text('School email'))).pop();
+    expect(find.text('Account service is not configured yet.'), findsOneWidget);
+    Navigator.of(
+      tester.element(find.text('Account service is not configured yet.')),
+    ).pop();
     await tester.pumpAndSettle();
     expect(find.text('UTRGV-GO'), findsOneWidget);
   });

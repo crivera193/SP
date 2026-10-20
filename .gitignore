@@ -57,3 +57,5 @@ app.*.map.json
 *.keystore
 *.p12
 *.pfx
+
+app.config.local.json

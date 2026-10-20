@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'student_email.dart';
 import 'field_notes.dart';
 
@@ -21,15 +22,49 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (_busy || !_form.currentState!.validate()) return;
-    setState(() => _busy = true);
-    _password.clear();
     setState(() {
-      _message =
-          'Form valid. Authentication will be added in a later milestone.';
-      _busy = false;
+      _busy = true;
+      _message = null;
     });
+    try {
+      final client = Supabase.instance.client;
+      final email = _email.text.trim().toLowerCase();
+      if (_signUp) {
+        final response = await client.auth.signUp(
+          email: email,
+          password: _password.text,
+        );
+        if (mounted && response.session == null) {
+          setState(() {
+            _signUp = false;
+            _message =
+                'Account created. Instant sign-in is unavailable because email confirmation is enabled in the account service.';
+          });
+        }
+      } else {
+        await client.auth.signInWithPassword(
+          email: email,
+          password: _password.text,
+        );
+      }
+      _password.clear();
+    } on AuthException catch (error) {
+      if (mounted) {
+        setState(() => _message = error.message);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _message = 'Unable to reach the account service. Try again.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
   }
 
   @override

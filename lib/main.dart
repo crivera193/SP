@@ -1,10 +1,33 @@
 import 'package:flutter/material.dart';
-import 'auth/login_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'auth/auth_gate.dart';
+import 'config/app_configuration.dart';
 
-void main() => runApp(const CampusApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  String? startupError;
+  if (AppConfiguration.hasBackend) {
+    try {
+      await Supabase.initialize(
+        url: AppConfiguration.supabaseUrl,
+        publishableKey: AppConfiguration.supabaseKey,
+        authOptions: FlutterAuthClientOptions(
+          localStorage: SharedPreferencesLocalStorage(
+            persistSessionKey: 'campus_explorer_v1_session',
+          ),
+        ),
+      );
+    } catch (_) {
+      startupError =
+          'Unable to connect to the account service. Please restart and try again.';
+    }
+  }
+  runApp(CampusApp(startupError: startupError));
+}
 
 class CampusApp extends StatelessWidget {
-  const CampusApp({super.key});
+  const CampusApp({super.key, this.startupError});
+  final String? startupError;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'UTRGV-GO',
@@ -15,7 +38,17 @@ class CampusApp extends StatelessWidget {
       colorSchemeSeed: const Color(0xff123d2b),
     ),
     home: const WelcomeScreen(),
-    routes: {'/account': (_) => const LoginScreen()},
+    routes: {
+      '/account': (_) => !AppConfiguration.hasBackend
+          ? const Scaffold(
+              body: Center(
+                child: Text('Account service is not configured yet.'),
+              ),
+            )
+          : startupError != null
+          ? Scaffold(body: Center(child: Text(startupError!)))
+          : const AuthGate(),
+    },
   );
 }
 
