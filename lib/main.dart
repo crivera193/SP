@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'widgets/mapbox_configuration_notice.dart';
 import 'auth/auth_gate.dart';
 import 'config/app_configuration.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (hasMapboxConfiguration) MapboxOptions.setAccessToken(mapboxAccessToken);
   String? startupError;
   if (AppConfiguration.hasBackend) {
     try {
