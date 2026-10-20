@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'auth/login_screen.dart';
 
 void main() => runApp(const CampusApp());
 
@@ -14,11 +15,7 @@ class CampusApp extends StatelessWidget {
       colorSchemeSeed: const Color(0xff123d2b),
     ),
     home: const WelcomeScreen(),
-    routes: {
-      '/account': (_) => const Scaffold(
-        body: Center(child: Text('Account screens coming next.')),
-      ),
-    },
+    routes: {'/account': (_) => const LoginScreen()},
   );
 }
 

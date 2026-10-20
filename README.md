@@ -1,6 +1,7 @@
 # UTRGV-GO
 
-Flutter app shell, branding and navigation for Android and iOS.
+Flutter app shell, branding/navigation, and login/signup screens with local .edu validation.
+Authentication is not connected yet.
 
 ```sh
 flutter pub get

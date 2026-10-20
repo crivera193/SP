@@ -8,10 +8,8 @@ void main() {
     expect(find.text('UTRGV-GO'), findsOneWidget);
     await tester.tap(find.text('Get started'));
     await tester.pumpAndSettle();
-    expect(find.text('Account screens coming next.'), findsOneWidget);
-    Navigator.of(
-      tester.element(find.text('Account screens coming next.')),
-    ).pop();
+    expect(find.text('School email'), findsOneWidget);
+    Navigator.of(tester.element(find.text('School email'))).pop();
     await tester.pumpAndSettle();
     expect(find.text('UTRGV-GO'), findsOneWidget);
   });
