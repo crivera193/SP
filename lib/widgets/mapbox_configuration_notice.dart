@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import '../config/app_configuration.dart';
 
-const mapboxAccessToken = String.fromEnvironment('ACCESS_TOKEN');
+const mapboxAccessToken = AppConfiguration.mapboxAccessToken;
 const hasMapboxConfiguration = mapboxAccessToken != '';
 
 /// Only map screens require this configuration; authentication and other

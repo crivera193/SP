@@ -1,7 +1,15 @@
-/// New-project configuration only; no fallback to the former team's backend.
+/// Supabase configuration for UTRGV-GO.
 abstract final class AppConfiguration {
-  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-  static const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+  static const supabaseUrl = 'https://bsvcnndqvjizxgnxhxkd.supabase.co';
+
+  static const supabaseKey = 'sb_publishable_0TeJ8pFvThAfWNm9gCPTwQ_vqEfSDRs';
+
   static bool get hasBackend =>
       supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty;
+
+  static const mapboxAccessToken = String.fromEnvironment(
+  'MAPBOX_ACCESS_TOKEN',
+  defaultValue: '',
+);
+
 }
