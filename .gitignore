@@ -61,3 +61,5 @@ app.*.map.json
 app.config.local.json
 
 /config/local.json
+
+/mapbox.local.json

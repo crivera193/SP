@@ -1,5 +1,6 @@
-/// Supabase configuration for UTRGV-GO.
+/// Supabase and Mapbox configuration for UTRGV-GO.
 abstract final class AppConfiguration {
+  // Supabase configuration
   static const supabaseUrl = 'https://bsvcnndqvjizxgnxhxkd.supabase.co';
 
   static const supabaseKey = 'sb_publishable_0TeJ8pFvThAfWNm9gCPTwQ_vqEfSDRs';
@@ -8,8 +9,7 @@ abstract final class AppConfiguration {
       supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty;
 
   static const mapboxAccessToken = String.fromEnvironment(
-  'MAPBOX_ACCESS_TOKEN',
-  defaultValue: '',
-);
-
+    'MAPBOX_ACCESS_TOKEN',
+    defaultValue: '',
+  );
 }

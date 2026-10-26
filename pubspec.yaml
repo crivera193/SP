@@ -19,6 +19,7 @@ flutter:
   assets:
     - assets/auth/field-notes-map.png
     - assets/campus/
+    - assets/icon/
   fonts:
     - family: Inter
       fonts:

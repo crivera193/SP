@@ -5,14 +5,22 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart'
+    hide Size;
 
 import '../map/campus_geography.dart';
 import '../map/campus_style.dart';
 import '../widgets/mapbox_configuration_notice.dart';
 
-/// Campus geometry only.
-/// No location subscription or player/game integration.
+/// Campus-only Mapbox screen.
+///
+/// Displays:
+/// - UTRGV campus geometry
+/// - 3D buildings
+/// - Sidewalks and roads
+/// - Official UTRGV building abbreviations
+///
+/// No GPS player or game integration.
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
@@ -21,11 +29,11 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  // UTRGV Edinburg campus opening coordinates.
+  // UTRGV Edinburg Student Union.
   static const double _startLatitude = 26.30546;
   static const double _startLongitude = -98.17525;
 
-  static const double _startZoom = 18.5;
+  static const double _startZoom = 16.5;
   static const double _startPitch = 45.0;
 
   CampusGeography? _geography;
@@ -47,26 +55,137 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  /// Merge official building names with existing
+  /// campus GeoJSON using OpenStreetMap IDs.
+  String _applyBuildingLabels(
+    String geographyJson,
+    String buildingLabelsJson,
+  ) {
+    final geography =
+        jsonDecode(geographyJson) as Map<String, dynamic>;
+
+    final labelsData =
+        jsonDecode(buildingLabelsJson) as Map<String, dynamic>;
+
+    final features = geography['features'] as List;
+    final labels = labelsData['labels'] as List;
+
+    final labelLookup = <String, Map<String, dynamic>>{};
+
+    // Build lookup table of verified building labels.
+    for (final item in labels) {
+      final entry = item as Map<String, dynamic>;
+
+      if (entry['verified_name'] != true) {
+        continue;
+      }
+
+      final osmId = entry['osm_id'] as String?;
+      final code = entry['code'] as String?;
+
+      if (osmId == null ||
+          code == null ||
+          code.isEmpty) {
+        continue;
+      }
+
+      labelLookup.putIfAbsent(
+        osmId,
+        () => entry,
+      );
+    }
+
+    // Track buildings that have already received labels.
+    final labeledBuildings = <String>{};
+
+    for (final item in features) {
+      final feature = item as Map<String, dynamic>;
+
+      final properties =
+          feature['properties'] as Map<String, dynamic>;
+
+      if (properties['kind'] != 'building') {
+        continue;
+      }
+
+      final osmId = properties['osm_id'] as String?;
+
+      if (osmId == null) {
+        continue;
+      }
+
+      final building = labelLookup[osmId];
+
+      if (building == null) {
+        // Keep existing labels where a verified
+        // building mapping is unavailable.
+        continue;
+      }
+
+      // Prevent duplicate labels.
+      if (labeledBuildings.contains(osmId)) {
+        properties.remove('label');
+        continue;
+      }
+
+      labeledBuildings.add(osmId);
+
+      // Short official building code shown on map.
+      properties['label'] = building['code'];
+
+      // Full name for future building information popup.
+      properties['official_name'] = building['name'];
+
+      // Building abbreviation.
+      properties['building_code'] = building['code'];
+    }
+
+    return jsonEncode(geography);
+  }
+
+  /// Load campus geometry and official labels.
   Future<void> _load() async {
     try {
+      // Campus boundary.
       final boundary = await rootBundle.loadString(
         'assets/campus/boundary.geojson',
       );
 
+      // Original building, road, and sidewalk geometry.
       final data = await rootBundle.loadString(
         'assets/campus/features.geojson',
       );
 
-      final geography = CampusGeography.fromGeoJson(boundary);
+      // Official UTRGV building labels.
+      final buildingLabels = await rootBundle.loadString(
+        'assets/campus/building-labels.json',
+      );
 
-      final directory = await Directory.systemTemp.createTemp(
+      // Merge building abbreviations into the map data.
+      final updatedData = _applyBuildingLabels(
+        data,
+        buildingLabels,
+      );
+
+      final geography = CampusGeography.fromGeoJson(
+        boundary,
+      );
+
+      // Generate local custom Mapbox style.
+      final directory =
+          await Directory.systemTemp.createTemp(
         'utrgv-campus-',
       );
 
       final file = await File(
         '${directory.path}/style.json',
       ).writeAsString(
-        jsonEncode(CampusStyle.build(boundary, data)),
+        jsonEncode(
+          CampusStyle.build(
+            boundary,
+            updatedData,
+          ),
+        ),
         flush: true,
       );
 
@@ -82,7 +201,11 @@ class _MapScreenState extends State<MapScreen> {
         _ready = false;
         _error = null;
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint(
+        'UTRGV campus loading error: $error',
+      );
+
       if (mounted) {
         setState(() {
           _error = 'Unable to load campus data.';
@@ -91,16 +214,18 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  Point _point(CampusPoint p) {
+  /// Convert campus longitude and latitude
+  /// to a Mapbox Point.
+  Point _point(CampusPoint point) {
     return Point(
       coordinates: Position(
-        p.longitude,
-        p.latitude,
+        point.longitude,
+        point.latitude,
       ),
     );
   }
 
-  /// Opening camera centered on UTRGV Edinburg.
+  /// Initial camera position over Student Union.
   CameraOptions get _openingCamera {
     return CameraOptions(
       center: Point(
@@ -121,6 +246,7 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  /// Configure Mapbox camera restrictions.
   Future<void> _prepare() async {
     final map = _map;
     final campus = _geography;
@@ -136,7 +262,7 @@ class _MapScreenState extends State<MapScreen> {
     _preparing = true;
 
     try {
-      // Restrict camera movement to UTRGV campus.
+      // Limit camera to UTRGV campus.
       await map.setBounds(
         CameraBoundsOptions(
           bounds: CoordinateBounds(
@@ -161,8 +287,8 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
 
-      // Allow panning and zooming.
-      // Disable camera rotation and pitch gestures.
+      // Allow panning and zooming,
+      // but prevent rotation and pitch changes.
       await map.gestures.updateSettings(
         GesturesSettings(
           rotateEnabled: false,
@@ -171,7 +297,7 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
 
-      // Disable user location indicator.
+      // Disable device location indicator.
       await map.location.updateSettings(
         LocationComponentSettings(
           enabled: false,
@@ -185,16 +311,21 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
 
-      // Set the exact opening camera instead of
-      // automatically fitting the entire campus.
-      await map.setCamera(_openingCamera);
+      // Open over Student Union.
+      await map.setCamera(
+        _openingCamera,
+      );
 
       if (mounted) {
         setState(() {
           _ready = true;
         });
       }
-    } catch (_) {
+    } catch (error) {
+      debugPrint(
+        'UTRGV Mapbox preparation error: $error',
+      );
+
       if (mounted) {
         setState(() {
           _error = 'Campus map could not load.';
@@ -220,7 +351,6 @@ class _MapScreenState extends State<MapScreen> {
               key: ValueKey(_styleUri),
               styleUri: _styleUri!,
 
-              // Initial map position.
               viewport: CameraViewportState(
                 center: Point(
                   coordinates: Position(
@@ -244,13 +374,15 @@ class _MapScreenState extends State<MapScreen> {
               },
 
               onMapLoadErrorListener: (event) {
-                if (event.type == MapLoadErrorType.GLYPHS) {
+                if (event.type ==
+                    MapLoadErrorType.GLYPHS) {
                   return;
                 }
 
                 if (mounted) {
                   setState(() {
-                    _error = 'Campus map could not load.';
+                    _error =
+                        'Campus map could not load.';
                   });
                 }
               },
