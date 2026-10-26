@@ -185,7 +185,8 @@ class _CowboySpriteState extends State<CowboySprite>
     if (_images.length != 3) return const SizedBox.shrink();
     final pitch = _facing.pitch(p.pitch),
         direction = _facing.direction(widget.motion.heading, p.bearing);
-    final height = (64 + (p.zoom - 16) * 5).clamp(48.0, 84.0),
+    // Larger Vaquero character.
+    final height = (130 + (p.zoom - 16) * 10).clamp(110.0, 175.0),
         width = height * 160 / 192;
     final anchor = _anchors[pitch];
     return Positioned(
