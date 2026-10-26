@@ -1,8 +1,23 @@
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'student_email.dart';
-import 'field_notes.dart';
+import 'login_style.dart';
+
+/// Validates UTRGV email addresses.
+///
+/// This validates the email format only.
+/// Supabase enforces account restrictions on the server.
+abstract final class StudentEmail {
+  static final _pattern = RegExp(
+    r"^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@utrgv\.edu$",
+    caseSensitive: false,
+  );
+
+  static bool isEligible(String value) {
+    return _pattern.hasMatch(value.trim());
+  }
+}
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -21,9 +36,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscure = true;
   String? _message;
 
-  static const String _logo = 'assets/icon/UTRGV_GO_removebg.png';
+  static const String _logo =
+      'assets/icon/UTRGV_GO_removebg.png';
 
-  // Dark blue based on the logo outline.
+  // UTRGV-GO dark navy blue.
   static const Color _vgoBlue = Color(0xFF061E4A);
 
   @override
@@ -33,8 +49,14 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  // ========================================
+  // SUPABASE AUTHENTICATION
+  // ========================================
+
   Future<void> _submit() async {
-    if (_busy || !_form.currentState!.validate()) return;
+    if (_busy || !_form.currentState!.validate()) {
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -46,6 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final email = _email.text.trim().toLowerCase();
 
       if (_signUp) {
+        // Create a new UTRGV student account.
         final response = await client.auth.signUp(
           email: email,
           password: _password.text,
@@ -59,6 +82,7 @@ class _LoginScreenState extends State<LoginScreen> {
           });
         }
       } else {
+        // Sign in to an existing account.
         await client.auth.signInWithPassword(
           email: email,
           password: _password.text,
@@ -68,20 +92,29 @@ class _LoginScreenState extends State<LoginScreen> {
       _password.clear();
     } on AuthException catch (error) {
       if (mounted) {
-        setState(() => _message = error.message);
+        setState(() {
+          _message = error.message;
+        });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
-          _message = 'Unable to reach the account service. Try again.';
+          _message =
+              'Unable to reach the account service. Try again.';
         });
       }
     } finally {
       if (mounted) {
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+        });
       }
     }
   }
+
+  // ========================================
+  // SWITCH LOGIN / REGISTRATION
+  // ========================================
 
   void _toggleMode() {
     if (_busy) return;
@@ -93,6 +126,10 @@ class _LoginScreenState extends State<LoginScreen> {
       _form.currentState?.reset();
     });
   }
+
+  // ========================================
+  // LOGIN SCREEN DESIGN
+  // ========================================
 
   @override
   Widget build(BuildContext context) {
@@ -122,11 +159,15 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(5),
-            borderSide: const BorderSide(color: _vgoBlue),
+            borderSide: const BorderSide(
+              color: _vgoBlue,
+            ),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(5),
-            borderSide: const BorderSide(color: _vgoBlue),
+            borderSide: const BorderSide(
+              color: _vgoBlue,
+            ),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(5),
@@ -138,8 +179,10 @@ class _LoginScreenState extends State<LoginScreen> {
           errorMaxLines: 3,
         ),
       ),
+
       child: Scaffold(
         backgroundColor: journalPaper,
+
         body: JournalPaper(
           child: SafeArea(
             child: LayoutBuilder(
@@ -147,40 +190,62 @@ class _LoginScreenState extends State<LoginScreen> {
                 return SingleChildScrollView(
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
+
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
                       minHeight: viewport.maxHeight,
                     ),
+
                     child: Center(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 460),
+                        constraints: const BoxConstraints(
+                          maxWidth: 460,
+                        ),
+
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 24,
                             vertical: 28,
                           ),
+
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            crossAxisAlignment:
+                                CrossAxisAlignment.stretch,
+
                             children: [
+                              // ==========================
+                              // UTRGV-GO LOGO
+                              // ==========================
+
                               Center(
                                 child: Image.asset(
                                   _logo,
                                   width: 280,
                                   fit: BoxFit.contain,
-                                  semanticLabel: 'UTRGV-GO logo',
+                                  semanticLabel:
+                                      'UTRGV-GO logo',
                                 ),
                               ),
 
                               const SizedBox(height: 28),
 
+                              // ==========================
+                              // LOGIN / SIGNUP FORM
+                              // ==========================
+
                               Form(
                                 key: _form,
+
                                 child: AutofillGroup(
                                   child: Column(
                                     crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
+                                        CrossAxisAlignment
+                                            .stretch,
+
                                     children: [
+                                      // EMAIL LABEL
+
                                       Text(
                                         'UTRGV email',
                                         style: journalType(
@@ -188,24 +253,40 @@ class _LoginScreenState extends State<LoginScreen> {
                                           color: _vgoBlue,
                                         ),
                                       ),
+
                                       const SizedBox(height: 8),
+
+                                      // EMAIL INPUT
+
                                       TextFormField(
                                         controller: _email,
                                         enabled: !_busy,
+
                                         keyboardType:
-                                            TextInputType.emailAddress,
-                                        textInputAction: TextInputAction.next,
+                                            TextInputType
+                                                .emailAddress,
+
+                                        textInputAction:
+                                            TextInputAction
+                                                .next,
+
                                         autocorrect: false,
+
                                         style: const TextStyle(
                                           color: _vgoBlue,
                                           fontSize: 16,
                                         ),
+
                                         autofillHints: const [
                                           AutofillHints.email,
                                         ],
-                                        decoration: const InputDecoration(
-                                          hintText: 'name@utrgv.edu',
+
+                                        decoration:
+                                            const InputDecoration(
+                                          hintText:
+                                              'name@utrgv.edu',
                                         ),
+
                                         validator: (value) {
                                           if (StudentEmail.isEligible(
                                             value ?? '',
@@ -219,6 +300,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                       const SizedBox(height: 22),
 
+                                      // ==========================
+                                      // PASSWORD
+                                      // ==========================
+
                                       Text(
                                         'Password',
                                         style: journalType(
@@ -226,67 +311,101 @@ class _LoginScreenState extends State<LoginScreen> {
                                           color: _vgoBlue,
                                         ),
                                       ),
+
                                       const SizedBox(height: 8),
+
                                       TextFormField(
                                         controller: _password,
                                         enabled: !_busy,
                                         obscureText: _obscure,
-                                        textInputAction: TextInputAction.done,
+
+                                        textInputAction:
+                                            TextInputAction
+                                                .done,
+
                                         style: const TextStyle(
                                           color: _vgoBlue,
                                           fontSize: 16,
                                         ),
+
                                         autofillHints: [
                                           _signUp
-                                              ? AutofillHints.newPassword
-                                              : AutofillHints.password,
+                                              ? AutofillHints
+                                                  .newPassword
+                                              : AutofillHints
+                                                  .password,
                                         ],
-                                        decoration: InputDecoration(
+
+                                        decoration:
+                                            InputDecoration(
                                           hintText: _signUp
                                               ? 'At least 8 characters'
                                               : 'Enter your password',
+
                                           suffixIcon: IconButton(
                                             tooltip: _obscure
                                                 ? 'Show password'
                                                 : 'Hide password',
+
                                             onPressed: _busy
                                                 ? null
                                                 : () {
                                                     setState(() {
-                                                      _obscure = !_obscure;
+                                                      _obscure =
+                                                          !_obscure;
                                                     });
                                                   },
+
                                             icon: Icon(
                                               _obscure
-                                                  ? Icons.visibility_outlined
-                                                  : Icons.visibility_off_outlined,
+                                                  ? Icons
+                                                      .visibility_outlined
+                                                  : Icons
+                                                      .visibility_off_outlined,
+
                                               color: _vgoBlue,
                                             ),
                                           ),
                                         ),
+
                                         validator: (value) {
-                                          if (value == null || value.isEmpty) {
+                                          if (value == null ||
+                                              value.isEmpty) {
                                             return 'Enter your password.';
                                           }
 
-                                          if (_signUp && value.length < 8) {
+                                          if (_signUp &&
+                                              value.length < 8) {
                                             return 'Use at least 8 characters.';
                                           }
 
                                           return null;
                                         },
-                                        onFieldSubmitted: (_) => _submit(),
+
+                                        onFieldSubmitted: (_) {
+                                          _submit();
+                                        },
                                       ),
+
+                                      // ==========================
+                                      // ERROR / STATUS MESSAGE
+                                      // ==========================
 
                                       if (_message != null)
                                         Padding(
                                           padding:
-                                              const EdgeInsets.only(top: 18),
+                                              const EdgeInsets.only(
+                                            top: 18,
+                                          ),
+
                                           child: Semantics(
                                             liveRegion: true,
+
                                             child: Text(
                                               _message!,
-                                              style: const TextStyle(
+
+                                              style:
+                                                  const TextStyle(
                                                 color: _vgoBlue,
                                               ),
                                             ),
@@ -295,21 +414,42 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                       const SizedBox(height: 26),
 
+                                      // ==========================
+                                      // SIGN IN / CREATE ACCOUNT
+                                      // ==========================
+
                                       FilledButton(
-                                        onPressed: _busy ? null : _submit,
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: _vgoBlue,
-                                          foregroundColor: journalPaper,
+                                        onPressed:
+                                            _busy ? null : _submit,
+
+                                        style:
+                                            FilledButton.styleFrom(
+                                          backgroundColor:
+                                              _vgoBlue,
+
+                                          foregroundColor:
+                                              journalPaper,
+
                                           minimumSize:
-                                              const Size.fromHeight(56),
-                                          shape: RoundedRectangleBorder(
+                                              const Size.fromHeight(
+                                            56,
+                                          ),
+
+                                          shape:
+                                              RoundedRectangleBorder(
                                             borderRadius:
-                                                BorderRadius.circular(5),
+                                                BorderRadius.circular(
+                                              5,
+                                            ),
                                           ),
                                         ),
+
                                         child: Row(
                                           children: [
-                                            const SizedBox(width: 32),
+                                            const SizedBox(
+                                              width: 32,
+                                            ),
+
                                             Expanded(
                                               child: Text(
                                                 _busy
@@ -317,33 +457,51 @@ class _LoginScreenState extends State<LoginScreen> {
                                                     : _signUp
                                                         ? 'Create account'
                                                         : 'Sign in',
-                                                textAlign: TextAlign.center,
+
+                                                textAlign:
+                                                    TextAlign.center,
+
                                                 style: journalType(
                                                   23,
-                                                  color: journalPaper,
+                                                  color:
+                                                      journalPaper,
                                                 ),
                                               ),
                                             ),
+
                                             Container(
                                               width: 32,
                                               height: 32,
-                                              decoration: const BoxDecoration(
+
+                                              decoration:
+                                                  const BoxDecoration(
                                                 color: _vgoBlue,
-                                                shape: BoxShape.circle,
+                                                shape:
+                                                    BoxShape.circle,
                                               ),
+
                                               child: _busy
                                                   ? const Padding(
                                                       padding:
-                                                          EdgeInsets.all(8),
+                                                          EdgeInsets.all(
+                                                        8,
+                                                      ),
+
                                                       child:
                                                           CircularProgressIndicator(
-                                                        strokeWidth: 2,
-                                                        color: Colors.white,
+                                                        strokeWidth:
+                                                            2,
+
+                                                        color:
+                                                            Colors.white,
                                                       ),
                                                     )
                                                   : const Icon(
-                                                      Icons.arrow_forward,
-                                                      color: Colors.white,
+                                                      Icons
+                                                          .arrow_forward,
+
+                                                      color:
+                                                          Colors.white,
                                                     ),
                                             ),
                                           ],
@@ -352,34 +510,51 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                       const SizedBox(height: 18),
 
+                                      // ==========================
+                                      // SWITCH BETWEEN MODES
+                                      // ==========================
+
                                       Wrap(
-                                        alignment: WrapAlignment.center,
+                                        alignment:
+                                            WrapAlignment.center,
+
                                         crossAxisAlignment:
-                                            WrapCrossAlignment.center,
+                                            WrapCrossAlignment
+                                                .center,
+
                                         children: [
                                           Text(
                                             _signUp
                                                 ? 'Already exploring?'
                                                 : 'New here?',
+
                                             style: journalType(
                                               16,
                                               color: _vgoBlue,
                                             ),
                                           ),
+
                                           TextButton(
-                                            onPressed:
-                                                _busy ? null : _toggleMode,
+                                            onPressed: _busy
+                                                ? null
+                                                : _toggleMode,
+
                                             child: Text(
                                               _signUp
                                                   ? 'Sign in'
                                                   : 'Create an account',
+
                                               style: journalType(
                                                 16,
-                                                color: _vgoBlue,
+                                                color:
+                                                    _vgoBlue,
                                               ).copyWith(
                                                 decoration:
-                                                    TextDecoration.underline,
-                                                decorationColor: _vgoBlue,
+                                                    TextDecoration
+                                                        .underline,
+
+                                                decorationColor:
+                                                    _vgoBlue,
                                               ),
                                             ),
                                           ),
@@ -392,15 +567,23 @@ class _LoginScreenState extends State<LoginScreen> {
 
                               const SizedBox(height: 16),
 
+                              // ==========================
+                              // FOOTER
+                              // ==========================
+
                               Divider(
-                                color: _vgoBlue.withValues(alpha: 0.35),
+                                color: _vgoBlue.withValues(
+                                  alpha: 0.35,
+                                ),
                               ),
 
                               const SizedBox(height: 14),
 
                               const Text(
                                 'Only @utrgv.edu email addresses accepted.',
+
                                 textAlign: TextAlign.center,
+
                                 style: TextStyle(
                                   color: _vgoBlue,
                                   fontSize: 10,

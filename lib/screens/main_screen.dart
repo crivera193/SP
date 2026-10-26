@@ -12,8 +12,14 @@ class MainScreen extends StatelessWidget {
       toolbarHeight: 44,
       backgroundColor: const Color(0xfff1f8eb),
 
-      // Remove the UTRGV-GO title.
-      title: const SizedBox.shrink(),
+title: const Text(
+  'Edinburg Campus',
+  style: TextStyle(
+    color: Color(0xFF061E4A),
+    fontSize: 18,
+    fontWeight: FontWeight.w600,
+  ),
+),
 
       actions: [
         TextButton.icon(

@@ -9,6 +9,7 @@ dependencies:
     sdk: flutter
   supabase_flutter: ^2.12.4
   mapbox_maps_flutter: 2.26.0
+  geolocator: ^14.1.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -20,6 +21,8 @@ flutter:
     - assets/auth/field-notes-map.png
     - assets/campus/
     - assets/icon/
+    - assets/player/cowboy/
+
   fonts:
     - family: Inter
       fonts:
