@@ -4,12 +4,15 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:geolocator/geolocator.dart' as gps;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 
 import '../map/campus_geography.dart';
 import '../map/campus_style.dart';
 import '../player/cowboy_motion.dart';
+import '../player/cowboy_travel.dart';
+import '../player/latest_projection.dart';
 import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
 
@@ -20,7 +23,8 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   // ==========================================
   // CAMERA CONFIGURATION
   // ==========================================
@@ -74,8 +78,18 @@ class _MapScreenState extends State<MapScreen> {
   gps.Position? _lastPosition;
   StreamSubscription<gps.Position>? _gpsSubscription;
 
-  bool _projectionBusy = false;
-  bool _projectionAgain = false;
+  final _travel = CowboyTravel();
+  late final Ticker _travelTicker;
+  late final LatestProjection<CowboyPlacement> _projector;
+  late final CameraViewportState _initialViewport;
+  CameraState? _cameraState;
+  Duration? _previousTravelTick;
+  Duration _lastProjectionTick = Duration.zero, _lastFollowTick = Duration.zero;
+  Timer? _expiry;
+  bool _foreground = true;
+  CampusPoint? _lastFollowCenter;
+  DateTime? _latestFixTime;
+  int _cameraRevision = 0;
 
   // First GPS follow applies the configured zoom.
   bool _followNeedsZoom = true;
@@ -100,6 +114,21 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _initialViewport = CameraViewportState(
+      center: Point(coordinates: Position(_startLongitude, _startLatitude)),
+      zoom: _startZoom,
+      pitch: _cameraPitch,
+      bearing: _cameraBearing,
+    );
+    _projector = LatestProjection<CowboyPlacement>(
+      read: _readCowboyProjection,
+      apply: (placement) {
+        if (mounted) _cowboyPlacement.value = placement;
+      },
+    );
+    _travelTicker = createTicker(_advanceTravel);
+    _expiry = Timer.periodic(const Duration(seconds: 1), (_) => _expireGps());
 
     if (hasMapboxConfiguration) {
       unawaited(_load());
@@ -108,9 +137,88 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _expiry?.cancel();
     unawaited(_gpsSubscription?.cancel());
+    _travelTicker.dispose();
+    _projector.dispose();
     _cowboyPlacement.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _foreground = false;
+      _clearTravel();
+      _cowboyMotion.stop();
+      _lastPosition = null;
+    } else if (state == AppLifecycleState.resumed) {
+      _foreground = true;
+      _expireGps();
+    }
+  }
+
+  void _clearTravel() {
+    _travel.clear();
+    _travelTicker.stop();
+    _previousTravelTick = null;
+    _pendingFollowPoint = null;
+    _lastFollowCenter = null;
+    _projector.cancel();
+    _cowboyPlacement.value = null;
+  }
+
+  void _expireGps() {
+    if (!mounted || !_foreground) return;
+    final now = DateTime.now();
+    final position = _lastPosition;
+    if (position != null &&
+        now.difference(position.timestamp).inMilliseconds > 6000) {
+      _cowboyMotion.stop();
+      _clearTravel();
+      setState(() {
+        _lastPosition = null;
+        _locationMessage = 'GPS update is stale · waiting for location';
+      });
+      return;
+    }
+    final wasWalking = _cowboyMotion.walking;
+    _cowboyMotion.expire(now);
+    if (wasWalking != _cowboyMotion.walking) unawaited(_projectCowboy());
+  }
+
+  void _advanceTravel(Duration elapsed) {
+    if (!_foreground || !_ready || _lastPosition == null) {
+      _travelTicker.stop();
+      _previousTravelTick = null;
+      return;
+    }
+    final dt = _previousTravelTick == null
+        ? 0.0
+        : (elapsed - _previousTravelTick!).inMicroseconds / 1000000;
+    _previousTravelTick = elapsed;
+    final changed = _travel.advance(dt, contains: _geography!.contains);
+    if (changed &&
+        elapsed - _lastProjectionTick >= const Duration(milliseconds: 33)) {
+      _lastProjectionTick = elapsed;
+      unawaited(_projectCowboy());
+    }
+    if (changed &&
+        _following &&
+        elapsed - _lastFollowTick >= const Duration(milliseconds: 66)) {
+      _lastFollowTick = elapsed;
+      final p = _travel.position;
+      if (p != null) unawaited(_followPosition(p));
+    }
+    if (!_travel.moving) {
+      _travelTicker.stop();
+      _previousTravelTick = null;
+      unawaited(_projectCowboy());
+      final p = _travel.position;
+      if (_following && p != null) unawaited(_followPosition(p));
+    }
   }
 
   // ==========================================
@@ -186,6 +294,10 @@ class _MapScreenState extends State<MapScreen> {
   // ==========================================
 
   Future<void> _load() async {
+    _clearTravel();
+    _cowboyMotion.stop();
+    _lastPosition = null;
+    _cameraState = null;
     try {
       final boundary = await rootBundle.loadString(
         'assets/campus/boundary.geojson',
@@ -398,12 +510,11 @@ class _MapScreenState extends State<MapScreen> {
 
       // Immediately center on the last known
       // accepted campus GPS coordinate.
-      final currentPosition = _lastPosition;
+      _expireGps();
+      final currentPosition = _travel.position;
 
       if (currentPosition != null) {
-        await _followPosition(
-          CampusPoint(currentPosition.longitude, currentPosition.latitude),
-        );
+        await _followPosition(currentPosition);
       }
 
       // If GPS is already active, don't create
@@ -427,10 +538,9 @@ class _MapScreenState extends State<MapScreen> {
           ).listen(
             _onGpsFix,
             onError: (Object error) {
-              _cowboyMotion.stop();
-
               if (mounted) {
-                _cowboyPlacement.value = null;
+                _cowboyMotion.stop();
+                _clearTravel();
 
                 setState(() {
                   _following = false;
@@ -443,6 +553,14 @@ class _MapScreenState extends State<MapScreen> {
             },
             onDone: () {
               _gpsSubscription = null;
+              if (mounted) {
+                _cowboyMotion.stop();
+                _clearTravel();
+                setState(() {
+                  _lastPosition = null;
+                  _locationMessage = 'GPS updates unavailable.';
+                });
+              }
             },
           );
     } catch (error) {
@@ -482,8 +600,31 @@ class _MapScreenState extends State<MapScreen> {
   // ==========================================
 
   void _onGpsFix(gps.Position position) {
-    if (!mounted || !_ready) return;
-
+    if (!mounted || !_ready || !_foreground) return;
+    final now = DateTime.now();
+    if (_latestFixTime != null &&
+        !position.timestamp.isAfter(_latestFixTime!)) {
+      return;
+    }
+    final age = now.difference(position.timestamp).inMilliseconds;
+    if (age > 6000 ||
+        age < -2000 ||
+        !position.accuracy.isFinite ||
+        position.accuracy < 0 ||
+        position.accuracy > 40 ||
+        !position.latitude.isFinite ||
+        !position.longitude.isFinite ||
+        position.latitude.abs() > 90 ||
+        position.longitude.abs() > 180) {
+      _cowboyMotion.stop();
+      _clearTravel();
+      setState(() {
+        _lastPosition = null;
+        _locationMessage = 'Waiting for a fresh, accurate GPS position.';
+      });
+      return;
+    }
+    _latestFixTime = position.timestamp;
     final campus = _geography;
     if (campus == null) return;
 
@@ -492,8 +633,7 @@ class _MapScreenState extends State<MapScreen> {
     // Only show the player inside campus.
     if (!campus.contains(point)) {
       _cowboyMotion.stop();
-      _cowboyPlacement.value = null;
-      _pendingFollowPoint = null;
+      _clearTravel();
 
       setState(() {
         _lastPosition = null;
@@ -510,23 +650,32 @@ class _MapScreenState extends State<MapScreen> {
       latitude: position.latitude,
       accuracy: position.accuracy,
       timestamp: position.timestamp,
-      now: DateTime.now(),
+      now: now,
       onCampus: true,
-      measuredSpeed: position.speed,
-      speedAccuracy: position.speedAccuracy,
+      measuredSpeed: position.hasSpeed ? position.speed : null,
+      speedAccuracy: position.hasSpeedAccuracy ? position.speedAccuracy : null,
     );
 
-    setState(() {
-      _lastPosition = position;
-      _locationMessage = null;
-    });
+    _lastPosition = position;
+    if (_locationMessage != null) setState(() => _locationMessage = null);
+    _travel.accept(
+      point,
+      position.timestamp,
+      accuracy: position.accuracy,
+      walking: _cowboyMotion.walking,
+    );
+    if (_travel.moving && !_travelTicker.isActive) {
+      _previousTravelTick = null;
+      _lastProjectionTick = _lastFollowTick = Duration.zero;
+      _travelTicker.start();
+    }
 
     // Update the character on the map.
-    unawaited(_projectCowboy());
+    unawaited(_projector.request(invalidate: true));
 
     // Update camera when following is enabled.
     if (_following) {
-      unawaited(_followPosition(point));
+      unawaited(_followPosition(_travel.position!));
     }
   }
 
@@ -538,7 +687,7 @@ class _MapScreenState extends State<MapScreen> {
   /// repeatedly resetting the zoom or pitch.
 
   Future<void> _followPosition(CampusPoint point) async {
-    if (!_ready || !_following) return;
+    if (!_ready || !_following || !_foreground) return;
 
     _pendingFollowPoint = point;
 
@@ -548,7 +697,11 @@ class _MapScreenState extends State<MapScreen> {
     _followBusy = true;
 
     try {
-      while (_pendingFollowPoint != null && _following && _ready && mounted) {
+      while (_pendingFollowPoint != null &&
+          _following &&
+          _ready &&
+          mounted &&
+          _foreground) {
         final next = _pendingFollowPoint;
         _pendingFollowPoint = null;
 
@@ -556,10 +709,18 @@ class _MapScreenState extends State<MapScreen> {
         if (map == null || next == null) break;
 
         final useFollowZoom = _followNeedsZoom;
+        if (!useFollowZoom &&
+            _lastFollowCenter != null &&
+            CampusGeography.distance(_lastFollowCenter!, next) < 0.02) {
+          continue;
+        }
+        final cameraRevision = _cameraRevision;
+        _followNeedsZoom = false;
+        _lastFollowCenter = next;
 
         await map.setCamera(
           CameraOptions(
-            center: _point(next),
+            center: _point(_geography!.clampCameraCenter(next)),
 
             // Apply the GPS-follow zoom only once.
             zoom: useFollowZoom
@@ -572,9 +733,10 @@ class _MapScreenState extends State<MapScreen> {
           ),
         );
 
-        _followNeedsZoom = false;
-
-        unawaited(_projectCowboy());
+        if (cameraRevision == _cameraRevision && mounted && _map == map) {
+          _cameraState = await map.getCameraState();
+        }
+        unawaited(_projector.request(invalidate: true));
       }
     } catch (error) {
       debugPrint('GPS camera follow failed: $error');
@@ -587,58 +749,27 @@ class _MapScreenState extends State<MapScreen> {
   // VAQUERO MAPBOX PROJECTION
   // ==========================================
 
-  /// Converts the GPS coordinate into a
-  /// Flutter screen position for the sprite.
-  Future<void> _projectCowboy() async {
-    if (_projectionBusy) {
-      _projectionAgain = true;
-      return;
+  Future<void> _projectCowboy() => _projector.request();
+
+  Future<CowboyPlacement?> _readCowboyProjection() async {
+    final map = _map, position = _travel.position;
+    if (map == null ||
+        position == null ||
+        !_ready ||
+        !mounted ||
+        !_foreground ||
+        _lastPosition == null) {
+      return null;
     }
-
-    _projectionBusy = true;
-
-    try {
-      do {
-        _projectionAgain = false;
-
-        final map = _map;
-        final position = _lastPosition;
-
-        if (map == null || position == null || !_ready || !mounted) {
-          break;
-        }
-
-        final point = CampusPoint(position.longitude, position.latitude);
-
-        final pixel = await map.pixelForCoordinate(_point(point));
-
-        final camera = await map.getCameraState();
-
-        if (!mounted) break;
-
-        // Verify that a newer GPS position did
-        // not invalidate the result.
-        if (!identical(position, _lastPosition)) {
-          _projectionAgain = true;
-          continue;
-        }
-
-        if (pixel.x.isFinite && pixel.y.isFinite) {
-          _cowboyPlacement.value = CowboyPlacement(
-            Offset(pixel.x, pixel.y),
-            camera.bearing,
-            camera.pitch,
-            camera.zoom,
-          );
-        } else {
-          _cowboyPlacement.value = null;
-        }
-      } while (_projectionAgain);
-    } catch (error) {
-      debugPrint('Vaquero projection failed: $error');
-    } finally {
-      _projectionBusy = false;
-    }
+    final camera = _cameraState ?? await map.getCameraState();
+    final pixel = await map.pixelForCoordinate(_point(position));
+    if (!pixel.x.isFinite || !pixel.y.isFinite) return null;
+    return CowboyPlacement(
+      Offset(pixel.x, pixel.y),
+      camera.bearing,
+      camera.pitch,
+      camera.zoom,
+    );
   }
 
   // ==========================================
@@ -663,14 +794,7 @@ class _MapScreenState extends State<MapScreen> {
               key: ValueKey(_styleUri),
               styleUri: _styleUri!,
 
-              viewport: CameraViewportState(
-                center: Point(
-                  coordinates: Position(_startLongitude, _startLatitude),
-                ),
-                zoom: _startZoom,
-                pitch: _cameraPitch,
-                bearing: _cameraBearing,
-              ),
+              viewport: _initialViewport,
 
               // GPS FOLLOW FIX:
               // Do not stop following in
@@ -680,8 +804,10 @@ class _MapScreenState extends State<MapScreen> {
 
               // Reproject the Vaquero when the
               // camera changes position or zoom.
-              onCameraChangeListener: (_) {
-                unawaited(_projectCowboy());
+              onCameraChangeListener: (event) {
+                _cameraState = event.cameraState;
+                _cameraRevision++;
+                unawaited(_projector.request(invalidate: true));
               },
 
               onMapCreated: (map) {
