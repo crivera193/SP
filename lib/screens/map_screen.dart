@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -6,23 +5,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as gps;
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart'
-    hide Size;
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 
 import '../map/campus_geography.dart';
 import '../map/campus_style.dart';
+import '../player/cowboy_motion.dart';
+import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
 
-/// UTRGV-GO campus map.
-///
-/// Features:
-/// - 3D buildings and sidewalks
-/// - Official building abbreviations
-/// - Campus-only camera restrictions
-/// - Adjustable zoom and pitch
-/// - Live GPS location
-/// - GPS-follow camera
-/// - Zoom controls
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
@@ -31,48 +21,32 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-
   // ==========================================
-  // MAPBOX CAMERA CONFIGURATION
+  // CAMERA CONFIGURATION
   // ==========================================
 
-  // UTRGV Student Union starting position.
   static const double _startLatitude = 26.30546;
   static const double _startLongitude = -98.17525;
 
-  // Initial zoom when opening the map.
   static const double _startZoom = 17.8;
-
-  // Zoom when following the GPS player.
   static const double _followZoom = 18.0;
 
-  // Map zoom limits.
   static const double _minZoom = 14.0;
   static const double _maxZoom = 19.5;
 
-  // Camera tilt in degrees.
-  // 0 = directly overhead.
-  // 45 = tilted 3D-style perspective.
-  // 60 = steeper viewing angle.
   static const double _cameraPitch = 45.0;
-
-  // Camera rotation.
   static const double _cameraBearing = 0.0;
 
   // ==========================================
   // GPS CONFIGURATION
   // ==========================================
 
-  // Requested GPS update interval on Android.
-  static const Duration _androidGpsInterval =
-      Duration(seconds: 1);
+  static const Duration _androidGpsInterval = Duration(seconds: 1);
 
-  // 0 = accept location changes without
-  // a minimum distance threshold.
   static const int _gpsDistanceFilterMeters = 0;
 
   // ==========================================
-  // MAPBOX STATE
+  // MAP STATE
   // ==========================================
 
   CampusGeography? _geography;
@@ -97,10 +71,17 @@ class _MapScreenState extends State<MapScreen> {
 
   StreamSubscription<gps.Position>? _gpsSubscription;
 
-  Offset? _markerPixel;
-
   bool _projectionBusy = false;
   bool _projectionAgain = false;
+
+  // ==========================================
+  // VAQUERO STATE
+  // ==========================================
+
+  final CowboyMotion _cowboyMotion = CowboyMotion();
+
+  final ValueNotifier<CowboyPlacement?> _cowboyPlacement =
+      ValueNotifier<CowboyPlacement?>(null);
 
   // ==========================================
   // INITIALIZATION
@@ -118,6 +99,9 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void dispose() {
     unawaited(_gpsSubscription?.cancel());
+
+    _cowboyPlacement.dispose();
+
     super.dispose();
   }
 
@@ -125,24 +109,16 @@ class _MapScreenState extends State<MapScreen> {
   // BUILDING LABELS
   // ==========================================
 
-  /// Adds official UTRGV building abbreviations
-  /// to existing campus GeoJSON features.
-  String _applyBuildingLabels(
-    String geographyJson,
-    String buildingLabelsJson,
-  ) {
-    final geography =
-        jsonDecode(geographyJson) as Map<String, dynamic>;
+  String _applyBuildingLabels(String geographyJson, String buildingLabelsJson) {
+    final geography = jsonDecode(geographyJson) as Map<String, dynamic>;
 
-    final labelsData =
-        jsonDecode(buildingLabelsJson) as Map<String, dynamic>;
+    final labelsData = jsonDecode(buildingLabelsJson) as Map<String, dynamic>;
 
     final features = geography['features'] as List;
     final labels = labelsData['labels'] as List;
 
     final lookup = <String, Map<String, dynamic>>{};
 
-    // Only use verified building names.
     for (final item in labels) {
       final entry = item as Map<String, dynamic>;
 
@@ -153,16 +129,11 @@ class _MapScreenState extends State<MapScreen> {
       final osmId = entry['osm_id'] as String?;
       final code = entry['code'] as String?;
 
-      if (osmId == null ||
-          code == null ||
-          code.isEmpty) {
+      if (osmId == null || code == null || code.isEmpty) {
         continue;
       }
 
-      lookup.putIfAbsent(
-        osmId,
-        () => entry,
-      );
+      lookup.putIfAbsent(osmId, () => entry);
     }
 
     final labeledBuildings = <String>{};
@@ -170,8 +141,7 @@ class _MapScreenState extends State<MapScreen> {
     for (final item in features) {
       final feature = item as Map<String, dynamic>;
 
-      final properties =
-          feature['properties'] as Map<String, dynamic>;
+      final properties = feature['properties'] as Map<String, dynamic>;
 
       if (properties['kind'] != 'building') {
         continue;
@@ -185,7 +155,6 @@ class _MapScreenState extends State<MapScreen> {
 
       if (building == null) continue;
 
-      // Avoid duplicate labels for multipart buildings.
       if (labeledBuildings.contains(osmId)) {
         properties.remove('label');
         continue;
@@ -202,7 +171,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   // ==========================================
-  // LOAD CAMPUS MAP
+  // LOAD CAMPUS DATA
   // ==========================================
 
   Future<void> _load() async {
@@ -219,29 +188,14 @@ class _MapScreenState extends State<MapScreen> {
         'assets/campus/building-labels.json',
       );
 
-      final updatedData = _applyBuildingLabels(
-        data,
-        buildingLabels,
-      );
+      final updatedData = _applyBuildingLabels(data, buildingLabels);
 
-      final geography =
-          CampusGeography.fromGeoJson(boundary);
+      final geography = CampusGeography.fromGeoJson(boundary);
 
-      // Generate custom Mapbox style.
-      final directory =
-          await Directory.systemTemp.createTemp(
-        'utrgv-campus-',
-      );
+      final directory = await Directory.systemTemp.createTemp('utrgv-campus-');
 
-      final file = await File(
-        '${directory.path}/style.json',
-      ).writeAsString(
-        jsonEncode(
-          CampusStyle.build(
-            boundary,
-            updatedData,
-          ),
-        ),
+      final file = await File('${directory.path}/style.json').writeAsString(
+        jsonEncode(CampusStyle.build(boundary, updatedData)),
         flush: true,
       );
 
@@ -256,13 +210,12 @@ class _MapScreenState extends State<MapScreen> {
         _preparing = false;
         _ready = false;
 
-        _markerPixel = null;
         _error = null;
       });
+
+      _cowboyPlacement.value = null;
     } catch (error) {
-      debugPrint(
-        'Campus loading error: $error',
-      );
+      debugPrint('Campus loading error: $error');
 
       if (mounted) {
         setState(() {
@@ -277,12 +230,7 @@ class _MapScreenState extends State<MapScreen> {
   // ==========================================
 
   Point _point(CampusPoint point) {
-    return Point(
-      coordinates: Position(
-        point.longitude,
-        point.latitude,
-      ),
-    );
+    return Point(coordinates: Position(point.longitude, point.latitude));
   }
 
   // ==========================================
@@ -291,26 +239,16 @@ class _MapScreenState extends State<MapScreen> {
 
   CameraOptions get _openingCamera {
     return CameraOptions(
-      center: Point(
-        coordinates: Position(
-          _startLongitude,
-          _startLatitude,
-        ),
-      ),
+      center: Point(coordinates: Position(_startLongitude, _startLatitude)),
       zoom: _startZoom,
       pitch: _cameraPitch,
       bearing: _cameraBearing,
-      padding: MbxEdgeInsets(
-        top: 0,
-        left: 0,
-        bottom: 0,
-        right: 0,
-      ),
+      padding: MbxEdgeInsets(top: 0, left: 0, bottom: 0, right: 0),
     );
   }
 
   // ==========================================
-  // CAMERA RESTRICTIONS
+  // CONFIGURE MAPBOX
   // ==========================================
 
   Future<void> _prepare() async {
@@ -328,22 +266,11 @@ class _MapScreenState extends State<MapScreen> {
     _preparing = true;
 
     try {
-      // Constrain camera to campus bounds.
       await map.setBounds(
         CameraBoundsOptions(
           bounds: CoordinateBounds(
-            southwest: _point(
-              CampusPoint(
-                campus.west,
-                campus.south,
-              ),
-            ),
-            northeast: _point(
-              CampusPoint(
-                campus.east,
-                campus.north,
-              ),
-            ),
+            southwest: _point(CampusPoint(campus.west, campus.south)),
+            northeast: _point(CampusPoint(campus.east, campus.north)),
             infiniteBounds: false,
           ),
           minZoom: _minZoom,
@@ -353,8 +280,6 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
 
-      // Allow panning and zooming.
-      // Disable rotation and manual pitch gestures.
       await map.gestures.updateSettings(
         GesturesSettings(
           rotateEnabled: false,
@@ -365,22 +290,13 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
 
-      // Disable Mapbox's native location puck.
-      // A custom GPS marker will be shown instead.
+      // The custom Vaquero replaces the native GPS puck.
       await map.location.updateSettings(
-        LocationComponentSettings(
-          enabled: false,
-        ),
+        LocationComponentSettings(enabled: false),
       );
 
-      // Hide scale bar.
-      await map.scaleBar.updateSettings(
-        ScaleBarSettings(
-          enabled: false,
-        ),
-      );
+      await map.scaleBar.updateSettings(ScaleBarSettings(enabled: false));
 
-      // Set initial position over Student Union.
       await map.setCamera(_openingCamera);
 
       if (mounted) {
@@ -388,10 +304,10 @@ class _MapScreenState extends State<MapScreen> {
           _ready = true;
         });
       }
+
+      unawaited(_projectCowboy());
     } catch (error) {
-      debugPrint(
-        'Mapbox setup error: $error',
-      );
+      debugPrint('Mapbox setup error: $error');
 
       if (mounted) {
         setState(() {
@@ -412,7 +328,6 @@ class _MapScreenState extends State<MapScreen> {
 
     if (map == null || !_ready) return;
 
-    // Manual zoom disables camera following.
     _stopFollowing();
 
     try {
@@ -422,17 +337,11 @@ class _MapScreenState extends State<MapScreen> {
           .clamp(_minZoom, _maxZoom)
           .toDouble();
 
-      await map.setCamera(
-        CameraOptions(
-          zoom: nextZoom,
-        ),
-      );
+      await map.setCamera(CameraOptions(zoom: nextZoom));
 
-      unawaited(_projectMarker());
+      unawaited(_projectCowboy());
     } catch (error) {
-      debugPrint(
-        'Unable to zoom map: $error',
-      );
+      debugPrint('Unable to zoom map: $error');
     }
   }
 
@@ -449,29 +358,21 @@ class _MapScreenState extends State<MapScreen> {
     });
 
     try {
-      final enabled =
-          await gps.Geolocator.isLocationServiceEnabled();
+      final enabled = await gps.Geolocator.isLocationServiceEnabled();
 
       if (!enabled) {
-        throw StateError(
-          'Enable location services on your device.',
-        );
+        throw StateError('Enable location services on your device.');
       }
 
-      var permission =
-          await gps.Geolocator.checkPermission();
+      var permission = await gps.Geolocator.checkPermission();
 
       if (permission == gps.LocationPermission.denied) {
-        permission =
-            await gps.Geolocator.requestPermission();
+        permission = await gps.Geolocator.requestPermission();
       }
 
       if (permission == gps.LocationPermission.denied ||
-          permission ==
-              gps.LocationPermission.deniedForever) {
-        throw StateError(
-          'Location permission is required.',
-        );
+          permission == gps.LocationPermission.deniedForever) {
+        throw StateError('Location permission is required.');
       }
 
       if (!mounted) return;
@@ -480,38 +381,50 @@ class _MapScreenState extends State<MapScreen> {
         _following = true;
       });
 
-      await _gpsSubscription?.cancel();
+      // If GPS is already running, use the last fix.
+      if (_gpsSubscription != null) {
+        final current = _lastPosition;
 
-      // Subscribe to live GPS updates.
+        if (current != null) {
+          await _followPosition(
+            CampusPoint(current.longitude, current.latitude),
+          );
+        }
+
+        return;
+      }
+
       _gpsSubscription =
           gps.Geolocator.getPositionStream(
-        locationSettings: Platform.isAndroid
-            ? gps.AndroidSettings(
-                accuracy: gps.LocationAccuracy.high,
-                distanceFilter:
-                    _gpsDistanceFilterMeters,
-                intervalDuration: _androidGpsInterval,
-              )
-            : const gps.LocationSettings(
-                accuracy: gps.LocationAccuracy.high,
-                distanceFilter:
-                    _gpsDistanceFilterMeters,
-              ),
-      ).listen(
-        _onGpsFix,
-        onError: (Object error) {
-          if (mounted) {
-            setState(() {
-              _following = false;
-              _locationMessage =
-                  'GPS updates unavailable.';
-            });
-          }
-        },
-      );
+            locationSettings: Platform.isAndroid
+                ? gps.AndroidSettings(
+                    accuracy: gps.LocationAccuracy.high,
+                    distanceFilter: _gpsDistanceFilterMeters,
+                    intervalDuration: _androidGpsInterval,
+                  )
+                : const gps.LocationSettings(
+                    accuracy: gps.LocationAccuracy.high,
+                    distanceFilter: _gpsDistanceFilterMeters,
+                  ),
+          ).listen(
+            _onGpsFix,
+            onError: (Object error) {
+              _cowboyMotion.stop();
+              _cowboyPlacement.value = null;
+
+              if (mounted) {
+                setState(() {
+                  _following = false;
+                  _lastPosition = null;
+                  _locationMessage = 'GPS updates unavailable.';
+                });
+              }
+            },
+          );
     } catch (error) {
       if (mounted) {
         setState(() {
+          _following = false;
           _locationMessage = error is StateError
               ? error.message
               : 'Could not start GPS.';
@@ -527,7 +440,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   // ==========================================
-  // STOP CAMERA FOLLOWING
+  // STOP FOLLOWING
   // ==========================================
 
   void _stopFollowing() {
@@ -539,43 +452,51 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   // ==========================================
-  // RECEIVE GPS COORDINATES
+  // RECEIVE LIVE GPS DATA
   // ==========================================
 
   void _onGpsFix(gps.Position position) {
     if (!mounted || !_ready) return;
 
     final campus = _geography;
-
     if (campus == null) return;
 
-    final point = CampusPoint(
-      position.longitude,
-      position.latitude,
-    );
+    final point = CampusPoint(position.longitude, position.latitude);
 
-    // Player marker only appears on campus.
+    // Do not display the Vaquero outside campus.
     if (!campus.contains(point)) {
+      _cowboyMotion.stop();
+      _cowboyPlacement.value = null;
+
       setState(() {
         _lastPosition = null;
-        _markerPixel = null;
         _following = false;
-        _locationMessage =
-            'GPS position is outside the campus boundary.';
+        _locationMessage = 'GPS position is outside the campus boundary.';
       });
 
       return;
     }
+
+    // Update walking speed, direction, and animation.
+    _cowboyMotion.accept(
+      longitude: position.longitude,
+      latitude: position.latitude,
+      accuracy: position.accuracy,
+      timestamp: position.timestamp,
+      now: DateTime.now(),
+      onCampus: true,
+      measuredSpeed: position.speed,
+      speedAccuracy: position.speedAccuracy,
+    );
 
     setState(() {
       _lastPosition = position;
       _locationMessage = null;
     });
 
-    // Update marker position.
-    unawaited(_projectMarker());
+    // Project geographic position onto the screen.
+    unawaited(_projectCowboy());
 
-    // Move camera only when GPS follow is enabled.
     if (_following) {
       unawaited(_followPosition(point));
     }
@@ -585,9 +506,7 @@ class _MapScreenState extends State<MapScreen> {
   // GPS FOLLOW CAMERA
   // ==========================================
 
-  Future<void> _followPosition(
-    CampusPoint point,
-  ) async {
+  Future<void> _followPosition(CampusPoint point) async {
     final map = _map;
 
     if (map == null || !_ready || !_following) {
@@ -598,35 +517,25 @@ class _MapScreenState extends State<MapScreen> {
       await map.setCamera(
         CameraOptions(
           center: _point(point),
-
-          // GPS follow zoom.
-          zoom: _followZoom
-              .clamp(_minZoom, _maxZoom)
-              .toDouble(),
-
-          // Fixed tilted camera.
+          zoom: _followZoom.clamp(_minZoom, _maxZoom).toDouble(),
           pitch: _cameraPitch,
-
-          // Keep north pointing upward.
           bearing: _cameraBearing,
         ),
       );
 
-      await _projectMarker();
+      unawaited(_projectCowboy());
     } catch (error) {
-      debugPrint(
-        'GPS camera update failed: $error',
-      );
+      debugPrint('GPS camera update failed: $error');
     }
   }
 
   // ==========================================
-  // GPS MARKER SCREEN POSITION
+  // VAQUERO MAPBOX PROJECTION
   // ==========================================
 
-  /// Converts geographic GPS coordinates
-  /// to Flutter screen coordinates.
-  Future<void> _projectMarker() async {
+  /// Converts real-world GPS coordinates
+  /// into a position on the Flutter screen.
+  Future<void> _projectCowboy() async {
     if (_projectionBusy) {
       _projectionAgain = true;
       return;
@@ -641,45 +550,38 @@ class _MapScreenState extends State<MapScreen> {
         final map = _map;
         final position = _lastPosition;
 
-        if (map == null ||
-            position == null ||
-            !_ready) {
+        if (map == null || position == null || !_ready || !mounted) {
           break;
         }
 
-        final pixel = await map.pixelForCoordinate(
-          _point(
-            CampusPoint(
-              position.longitude,
-              position.latitude,
-            ),
-          ),
-        );
+        final point = CampusPoint(position.longitude, position.latitude);
+
+        final pixel = await map.pixelForCoordinate(_point(point));
+
+        final camera = await map.getCameraState();
 
         if (!mounted) break;
 
-        setState(() {
-          if (pixel.x.isFinite && pixel.y.isFinite) {
-            _markerPixel = Offset(
-              pixel.x,
-              pixel.y,
-            );
-          } else {
-            _markerPixel = null;
-          }
-        });
+        if (pixel.x.isFinite && pixel.y.isFinite) {
+          _cowboyPlacement.value = CowboyPlacement(
+            Offset(pixel.x, pixel.y),
+            camera.bearing,
+            camera.pitch,
+            camera.zoom,
+          );
+        } else {
+          _cowboyPlacement.value = null;
+        }
       } while (_projectionAgain);
     } catch (error) {
-      debugPrint(
-        'GPS marker projection failed: $error',
-      );
+      debugPrint('Vaquero projection failed: $error');
     } finally {
       _projectionBusy = false;
     }
   }
 
   // ==========================================
-  // MAP SCREEN UI
+  // SCREEN UI
   // ==========================================
 
   @override
@@ -690,12 +592,12 @@ class _MapScreenState extends State<MapScreen> {
 
     return ColoredBox(
       color: const Color(0xffc9ddd3),
+
       child: Stack(
         children: [
           // ==================================
-          // MAPBOX WIDGET
+          // MAPBOX CAMPUS MAP
           // ==================================
-
           if (_styleUri != null)
             MapWidget(
               key: ValueKey(_styleUri),
@@ -703,28 +605,21 @@ class _MapScreenState extends State<MapScreen> {
 
               viewport: CameraViewportState(
                 center: Point(
-                  coordinates: Position(
-                    _startLongitude,
-                    _startLatitude,
-                  ),
+                  coordinates: Position(_startLongitude, _startLatitude),
                 ),
                 zoom: _startZoom,
                 pitch: _cameraPitch,
                 bearing: _cameraBearing,
               ),
 
-              // Stop following when manually moving map.
+              // Manual panning stops GPS following.
               onScrollListener: (_) {
                 _stopFollowing();
               },
 
-              onZoomListener: (_) {
-                _stopFollowing();
-              },
-
-              // Update GPS marker during camera movement.
+              // Reproject Vaquero when camera moves.
               onCameraChangeListener: (_) {
-                unawaited(_projectMarker());
+                unawaited(_projectCowboy());
               },
 
               onMapCreated: (map) {
@@ -738,8 +633,7 @@ class _MapScreenState extends State<MapScreen> {
               },
 
               onMapLoadErrorListener: (event) {
-                if (event.type ==
-                    MapLoadErrorType.GLYPHS) {
+                if (event.type == MapLoadErrorType.GLYPHS) {
                   return;
                 }
 
@@ -752,74 +646,44 @@ class _MapScreenState extends State<MapScreen> {
             ),
 
           // ==================================
-          // GPS LOCATION MARKER
+          // ANIMATED VAQUERO GPS PLAYER
           // ==================================
-
-          if (_ready && _markerPixel != null)
-            Positioned(
-              left: _markerPixel!.dx - 10,
-              top: _markerPixel!.dy - 10,
-              child: IgnorePointer(
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: const Color(0xff061e4a),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white,
-                      width: 3,
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          if (_ready)
+            CowboySprite(motion: _cowboyMotion, placement: _cowboyPlacement),
 
           // ==================================
-          // GPS AND ZOOM BUTTONS
+          // GPS AND ZOOM CONTROLS
           // ==================================
-
           if (_ready)
             Positioned(
               right: 12,
               bottom: 18,
+
               child: SafeArea(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // GPS follow button.
                     FloatingActionButton.small(
                       heroTag: 'campus-follow',
-                      tooltip: _following
-                          ? 'GPS following'
-                          : 'Follow my GPS',
+                      tooltip: _following ? 'GPS following' : 'Follow my GPS',
+
                       onPressed: _locating
                           ? null
                           : () {
                               if (_following) {
                                 _stopFollowing();
                               } else {
-                                unawaited(
-                                  _beginGpsFollow(),
-                                );
+                                unawaited(_beginGpsFollow());
                               }
                             },
+
                       child: Icon(
-                        _following
-                            ? Icons.gps_fixed
-                            : Icons.my_location,
+                        _following ? Icons.gps_fixed : Icons.my_location,
                       ),
                     ),
 
                     const SizedBox(height: 10),
 
-                    // Zoom in.
                     FloatingActionButton.small(
                       heroTag: 'campus-zoom-in',
                       tooltip: 'Zoom in',
@@ -831,7 +695,6 @@ class _MapScreenState extends State<MapScreen> {
 
                     const SizedBox(height: 8),
 
-                    // Zoom out.
                     FloatingActionButton.small(
                       heroTag: 'campus-zoom-out',
                       tooltip: 'Zoom out',
@@ -846,44 +709,46 @@ class _MapScreenState extends State<MapScreen> {
             ),
 
           // ==================================
-          // LOCATION MESSAGE
+          // GPS STATUS MESSAGE
           // ==================================
-
           if (_locationMessage != null && _ready)
             Positioned(
               left: 12,
               right: 76,
               bottom: 20,
+
               child: Material(
                 color: const Color(0xfff5f1e3),
                 borderRadius: BorderRadius.circular(8),
+
                 child: Padding(
                   padding: const EdgeInsets.all(10),
+
                   child: Text(
                     _locationMessage!,
-                    style: const TextStyle(
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(fontSize: 12),
                   ),
                 ),
               ),
             ),
 
           // ==================================
-          // LOADING / ERROR OVERLAY
+          // MAP LOADING / ERROR SCREEN
           // ==================================
-
           if (!_ready || _error != null)
             Positioned.fill(
               child: ColoredBox(
                 color: const Color(0xffc9ddd3),
+
                 child: Center(
                   child: _error == null
                       ? const CircularProgressIndicator()
                       : Column(
                           mainAxisSize: MainAxisSize.min,
+
                           children: [
                             Text(_error!),
+
                             TextButton(
                               onPressed: _load,
                               child: const Text('Retry'),
