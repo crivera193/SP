@@ -10,6 +10,8 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 
 import '../map/campus_geography.dart';
 import '../map/campus_style.dart';
+import '../map/kitty_island.dart';
+import '../widgets/kitty_island_cats.dart';
 import '../player/cowboy_motion.dart';
 import '../player/cowboy_travel.dart';
 import '../player/latest_projection.dart';
@@ -78,6 +80,8 @@ class _MapScreenState extends State<MapScreen>
   gps.Position? _lastPosition;
   StreamSubscription<gps.Position>? _gpsSubscription;
 
+  final _kittyPlacement = ValueNotifier<List<Offset>?>(null);
+  late final LatestProjection<List<Offset>> _kittyProjector;
   final _travel = CowboyTravel();
   late final Ticker _travelTicker;
   late final LatestProjection<CowboyPlacement> _projector;
@@ -121,6 +125,28 @@ class _MapScreenState extends State<MapScreen>
       pitch: _cameraPitch,
       bearing: _cameraBearing,
     );
+    _kittyProjector = LatestProjection<List<Offset>>(
+      read: () async {
+        final map = _map;
+        if (map == null ||
+            !_ready ||
+            !_styleLoaded ||
+            !_foreground ||
+            _error != null) {
+          return null;
+        }
+        final positions = <Offset>[];
+        for (final point in KittyIsland.cats) {
+          final pixel = await map.pixelForCoordinate(_point(point));
+          if (!pixel.x.isFinite || !pixel.y.isFinite) return null;
+          positions.add(Offset(pixel.x, pixel.y));
+        }
+        return positions;
+      },
+      apply: (positions) {
+        if (mounted) _kittyPlacement.value = positions;
+      },
+    );
     _projector = LatestProjection<CowboyPlacement>(
       read: _readCowboyProjection,
       apply: (placement) {
@@ -141,6 +167,8 @@ class _MapScreenState extends State<MapScreen>
     _expiry?.cancel();
     unawaited(_gpsSubscription?.cancel());
     _travelTicker.dispose();
+    _kittyProjector.dispose();
+    _kittyPlacement.dispose();
     _projector.dispose();
     _cowboyPlacement.dispose();
     super.dispose();
@@ -151,13 +179,24 @@ class _MapScreenState extends State<MapScreen>
     if (state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused) {
       _foreground = false;
+      _syncKittyCats();
       _clearTravel();
       _cowboyMotion.stop();
       _lastPosition = null;
     } else if (state == AppLifecycleState.resumed) {
       _foreground = true;
+      _syncKittyCats();
       _expireGps();
     }
+  }
+
+  void _syncKittyCats() {
+    if (!_foreground || !_ready || _error != null) {
+      _kittyProjector.cancel();
+      _kittyPlacement.value = null;
+      return;
+    }
+    unawaited(_kittyProjector.request(invalidate: true));
   }
 
   void _clearTravel() {
@@ -294,6 +333,8 @@ class _MapScreenState extends State<MapScreen>
   // ==========================================
 
   Future<void> _load() async {
+    _kittyProjector.cancel();
+    _kittyPlacement.value = null;
     _clearTravel();
     _cowboyMotion.stop();
     _lastPosition = null;
@@ -430,6 +471,7 @@ class _MapScreenState extends State<MapScreen>
         _ready = true;
       });
 
+      _syncKittyCats();
       unawaited(_projectCowboy());
     } catch (error) {
       debugPrint('Mapbox setup error: $error');
@@ -807,6 +849,7 @@ class _MapScreenState extends State<MapScreen>
               onCameraChangeListener: (event) {
                 _cameraState = event.cameraState;
                 _cameraRevision++;
+                _syncKittyCats();
                 unawaited(_projector.request(invalidate: true));
               },
 
@@ -829,9 +872,22 @@ class _MapScreenState extends State<MapScreen>
                   setState(() {
                     _error = 'Campus map could not load.';
                   });
+                  _syncKittyCats();
                 }
               },
             ),
+
+          // ==================================
+          // KITTY ISLAND CATS
+          // ==================================
+          Positioned.fill(
+            child: ValueListenableBuilder<List<Offset>?>(
+              valueListenable: _kittyPlacement,
+              builder: (_, positions, _) => positions == null
+                  ? const SizedBox.shrink()
+                  : KittyIslandCats(positions: positions),
+            ),
+          ),
 
           // ==================================
           // ANIMATED VAQUERO GPS PLAYER

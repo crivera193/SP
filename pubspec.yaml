@@ -10,6 +10,7 @@ dependencies:
   supabase_flutter: ^2.12.4
   mapbox_maps_flutter: 2.26.0
   geolocator: ^14.1.2
+  lottie: 3.6.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -22,6 +23,7 @@ flutter:
     - assets/campus/
     - assets/icon/
     - assets/player/cowboy/
+    - assets/animations/kitty-island/
 
   fonts:
     - family: Inter

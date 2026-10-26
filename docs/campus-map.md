@@ -36,3 +36,28 @@ The APK's embedded changed map source/helpers and cowboy assets matched the
 checkout. The preview emulator stopped answering Android shell commands during
 the in-place test installation; the waiting installer was canceled. Installation
 completion and smoothness of this revision are not visually verified.
+
+
+## Kitty Island cats — October 26, 2026
+
+SP reuses only UTRGV-GOTest's three bundled Lottie cats, Kitty Island positions
+and decorative widget. The existing source-defined courtyard catalog is retained
+from that implementation; this transfer does not create or alter live game-point
+configuration. Cats are visible when their map positions enter the viewport,
+independently of GPS, and their projection follows camera changes. Backgrounding,
+map reload/errors and disposal hide/stop the overlays. They do not intercept map
+input; reduced-motion preferences select still frames. The source animation has
+a 1.28-second loop; orange/gray are color-only derivatives.
+
+Assets, attribution and Lottie Simple License are under
+`assets/animations/kitty-island/`. The palette regeneration tool is
+`tool/create_kitty_variants.py`. No other creature artwork, proximity gates,
+Supabase data or gameplay features are imported. `test/kitty_island_test.dart`
+checks decoding, frame changes and input pass-through.
+
+Validation: scoped Flutter analysis is clean; all six SP tests pass, including
+actual Lottie decoding, frame differences and touch pass-through. Inspected the
+full 432x960 widget-rendered cat view. Android debug build passed, and packaged
+cat assets/source matched the checkout. Native map placement remains unverified
+because the preview emulator is still not answering Android shell commands; no
+new install was attempted. Dependency resolution uses Flutter 3.47.7's SDK pins.
