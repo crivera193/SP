@@ -17,6 +17,7 @@ import '../player/cowboy_travel.dart';
 import '../player/latest_projection.dart';
 import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
+import '../widgets/monstera_leaf.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -78,6 +79,15 @@ class _MapScreenState extends State<MapScreen>
   StreamSubscription<gps.Position>? _gpsSubscription;
 
   final _kittyPlacement = ValueNotifier<List<Offset>?>(null);
+  // Monstera leaf: longitude, latitude.
+  static const CampusPoint _monsteraLocation = CampusPoint(
+    -98.174994,
+    26.307521,
+  );
+
+  final _monsteraPlacement = ValueNotifier<Offset?>(null);
+
+  late final LatestProjection<Offset> _monsteraProjector;
 
   late final LatestProjection<List<Offset>> _kittyProjector;
 
@@ -170,6 +180,33 @@ class _MapScreenState extends State<MapScreen>
       },
     );
 
+    // Monstera leaf geographic projection.
+    _monsteraProjector = LatestProjection<Offset>(
+      read: () async {
+        final map = _map;
+
+        if (map == null ||
+            !_ready ||
+            !_styleLoaded ||
+            !_foreground ||
+            _error != null) {
+          return null;
+        }
+
+        final pixel = await map.pixelForCoordinate(_point(_monsteraLocation));
+
+        if (!pixel.x.isFinite || !pixel.y.isFinite) {
+          return null;
+        }
+
+        return Offset(pixel.x, pixel.y);
+      },
+      apply: (position) {
+        if (mounted) {
+          _monsteraPlacement.value = position;
+        }
+      },
+    );
     // ========================================
     // VAQUERO PROJECTION
     // ========================================
@@ -205,6 +242,8 @@ class _MapScreenState extends State<MapScreen>
 
     _kittyProjector.dispose();
     _kittyPlacement.dispose();
+    _monsteraProjector.dispose();
+    _monsteraPlacement.dispose();
 
     _projector.dispose();
     _cowboyPlacement.dispose();
@@ -223,6 +262,7 @@ class _MapScreenState extends State<MapScreen>
       _foreground = false;
 
       _syncKittyCats();
+      _syncMonsteraLeaf();
       _clearTravel();
 
       _cowboyMotion.stop();
@@ -231,6 +271,7 @@ class _MapScreenState extends State<MapScreen>
       _foreground = true;
 
       _syncKittyCats();
+      _syncMonsteraLeaf();
       _expireGps();
     }
   }
@@ -250,6 +291,15 @@ class _MapScreenState extends State<MapScreen>
     unawaited(_kittyProjector.request(invalidate: true));
   }
 
+  void _syncMonsteraLeaf() {
+    if (!_foreground || !_ready || _error != null) {
+      _monsteraProjector.cancel();
+      _monsteraPlacement.value = null;
+      return;
+    }
+
+    unawaited(_monsteraProjector.request(invalidate: true));
+  }
   // ==========================================
   // CLEAR VAQUERO TRAVEL
   // ==========================================
@@ -427,6 +477,8 @@ class _MapScreenState extends State<MapScreen>
   Future<void> _load() async {
     _kittyProjector.cancel();
     _kittyPlacement.value = null;
+    _monsteraProjector.cancel();
+    _monsteraPlacement.value = null;
 
     _clearTravel();
     _cowboyMotion.stop();
@@ -565,6 +617,7 @@ class _MapScreenState extends State<MapScreen>
       });
 
       _syncKittyCats();
+      _syncMonsteraLeaf();
 
       unawaited(_projectCowboy());
     } catch (error) {
@@ -1013,6 +1066,7 @@ class _MapScreenState extends State<MapScreen>
 
               onCameraChangeListener: (_) {
                 _syncKittyCats();
+                _syncMonsteraLeaf();
 
                 unawaited(_projector.request(invalidate: true));
               },
@@ -1038,6 +1092,7 @@ class _MapScreenState extends State<MapScreen>
                   });
 
                   _syncKittyCats();
+                  _syncMonsteraLeaf();
                 }
               },
             ),
@@ -1059,6 +1114,30 @@ class _MapScreenState extends State<MapScreen>
             ),
           ),
 
+          // ==================================
+          // MONSTERA LEAF GPS OVERLAY
+          // ==================================
+          Positioned.fill(
+            child: ValueListenableBuilder<Offset?>(
+              valueListenable: _monsteraPlacement,
+              builder: (_, position, _) {
+                if (position == null) {
+                  return const SizedBox.shrink();
+                }
+
+                return Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    Positioned(
+                      left: position.dx - 45,
+                      top: position.dy - 110,
+                      child: const MonsteraLeaf(),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
           // ==================================
           // ANIMATED VAQUERO
           // ==================================
