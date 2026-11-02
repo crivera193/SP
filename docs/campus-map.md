@@ -160,3 +160,50 @@ Launcher confusion was also resolved: current SP Map Verification is pinned in
 the lower-right dock instead of a changing suggested-app slot. The older UTRGV-GO
 shortcut is separately labeled on the home grid above YouTube. Both shortcuts were
 opened and their foreground package identities checked; neither app was removed.
+
+
+### Independent position correction and stop detection — November 2, 2026 (local)
+
+Supersedes the earlier idle-coordinate freeze. CowboyTravel no longer accepts a
+walking flag: accepted GPS coordinates retarget its bounded, non-extrapolating
+interpolation independently of gait. MapScreen no longer cancels interpolation
+when the motion state becomes idle. GPS loss still explicitly holds the cosmetic
+last-known position; freshness and proximity rules remain separate.
+
+Motion uses one completed observation window instead of adding a stationary timer
+after that window. Retaining at least three fixes supports irregular/sparse GPS
+updates. Walking entry requires accumulated displacement plus independent moving
+fixes; continuing a walk uses a lower speed threshold to tolerate uneven slow
+fixes. A confident speed-based stop additionally requires recent agreement with
+position-derived movement and a position that stopped advancing. Reliable slow
+speed is no longer classified in the stationary speed range. This preserves
+stuck-zero-provider fallback without allowing one isolated correction or a small
+jitter burst to establish walking.
+
+Verification: all 36 tests passed, analysis clean and diff check clean. Tests
+include accurate and missing speed, speed becoming stuck at zero, .35m/s walking
+and restart, uneven/duplicate slow fixes, update cadence .7–3s, isolated outliers,
+idle position correction, interpolation completion, and the native jitter replay.
+An intermediate native test exposed a slow-restart failure and a later trace
+exposed a brief jitter restart; both were repaired before the final pass and
+covered by explicit regressions. Passing an earlier build was not treated as
+verification of these later changes.
+
+Final native verification used the freshly built x86_64 map-only debug preview on
+UTRGV_GO_Preview/emulator-5554 (1080x2400), with synthetic continuous movement.
+The same walk/stop/resume replay used for the baseline measured legs becoming idle
+about 1.19s after the first stationary input for the steady stop (baseline 3.00s),
+and 1.41s for the small-jitter stop (baseline 2.29s). Whole-interval assertions
+confirmed idle gait did not restart during either stop. Maximum cosmetic travel
+after the stop command was .21m and .81m respectively; final displayed coordinates
+matched received coordinates in both cases. These delays include provider delivery
+and VM sampling, not a guarantee about physical human stopping time. Jitter can
+still cause small position corrections while the legs are idle.
+
+Native .35m/s walking remained active at 8/16/20s, stopped, restarted, and stopped
+again successfully. Automatic GPS startup and existing artwork were visible in
+the preview. Real phone GPS, first-time permissions, authenticated app flow and
+iOS runtime were not exercised in this pass. No new motion sensor dependency or
+permission was added. Source baseline 4e1561c plus these local changes; not pushed.
+Installed APK SHA-256 matched the fresh artifact:
+85e7460c0d7dfbc956c06270a8b081be702009517057eefa9e5917cef9e9aaba.

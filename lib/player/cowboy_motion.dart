@@ -7,8 +7,9 @@ class CowboyMotion {
   bool walking = false;
   _MotionFix? _anchor, _previous;
   DateTime? _lastMovement;
-  int _credibleSegments = 0;
-  double _stationarySeconds = 0, _threshold = 1.8;
+  int _movementFixes = 0;
+  double _threshold = 1.8;
+  DateTime? _corroboratedSpeedAt;
   final List<_MotionFix> _recent = [];
   _MotionFix? _lowSpeedAnchor;
 
@@ -48,24 +49,39 @@ class CowboyMotion {
       }
     }
     _recent.add(fix);
-    _recent.removeWhere(
-      (p) => timestamp.difference(p.time).inMilliseconds > 3000,
-    );
+    // Keep a fix at or before the two-second cutoff. Irregular update
+    // intervals must not leave a window that can never reach two seconds.
+    while (_recent.length > 3 &&
+        timestamp.difference(_recent[1].time).inMilliseconds >= 2000) {
+      _recent.removeAt(0);
+    }
     if (_recent.length > 32) _recent.removeAt(0);
     final windowSeconds =
         timestamp.difference(_recent.first.time).inMilliseconds / 1000;
     final net = _distance(_recent.first, fix);
     var path = 0.0;
+    var movingSegments = 0;
     for (var i = 1; i < _recent.length; i++) {
-      path += _distance(_recent[i - 1], _recent[i]);
+      final segment = _distance(_recent[i - 1], _recent[i]);
+      final seconds =
+          _recent[i].time.difference(_recent[i - 1].time).inMilliseconds / 1000;
+      path += segment;
+      if (seconds > 0 && segment / seconds >= 0.25) movingSegments++;
     }
     // A short coherent progression can be slow walking. Back-and-forth GPS
     // noise should not count as sustained motion just because each step is big.
     final progressing =
         windowSeconds >= 2 &&
-        net >= 0.8 &&
         net / windowSeconds >= 0.25 &&
         path > 0 &&
+        net / path >= 0.65 &&
+        movingSegments >= 2;
+    // Lower exit speed than entry speed: uneven slow fixes must not repeatedly
+    // stop an already established walk. A single jump cannot establish a walk.
+    final continuing =
+        windowSeconds >= 2 &&
+        path > 0 &&
+        net / windowSeconds >= 0.15 &&
         net / path >= 0.65;
     _previous = fix;
     final anchor = _anchor;
@@ -88,7 +104,7 @@ class CowboyMotion {
       1.8,
       math.min(3.5, math.max(accuracy, anchor.accuracy) * 0.15),
     );
-    final measuredStill = hasSpeed && measuredSpeed + speedAccuracy <= 0.45;
+    final measuredStill = hasSpeed && measuredSpeed + speedAccuracy <= 0.2;
     if (measuredStill) {
       _lowSpeedAnchor ??= fix;
     } else {
@@ -103,13 +119,38 @@ class CowboyMotion {
             math.max(3.5, math.min(8.0, accuracy * 0.5));
     final positionStill =
         windowSeconds >= 2 &&
-        !progressing &&
+        !continuing &&
         net <= math.max(1.0, math.min(2.0, accuracy * 0.1));
-    final stillEvidence = (measuredStill && !contradictsStill) || positionStill;
-    _stationarySeconds = stillEvidence
-        ? _stationarySeconds + interval.clamp(0.0, 3.0)
-        : 0;
-    if (_stationarySeconds >= 2.0) {
+    final stepSeconds = previous == null ? 0.0 : interval;
+    final stepSpeed = stepSeconds > 0
+        ? _distance(previous!, fix) / stepSeconds
+        : 0.0;
+    final windowSpeed = windowSeconds > 0 ? net / windowSeconds : 0.0;
+    if (stepSeconds > 0 && stepSpeed >= 0.25) {
+      _movementFixes = math.min(_movementFixes + 1, 2);
+    }
+    if (hasSpeed &&
+        speedAccuracy <= 0.3 &&
+        measuredSpeed >= 0.6 &&
+        progressing &&
+        (measuredSpeed - windowSpeed).abs() <= 0.5) {
+      _corroboratedSpeedAt = timestamp;
+    }
+    // Trust a speed-based stop only after this provider demonstrated agreement
+    // with movement, and only when the current position also stopped advancing.
+    // A stuck-zero simulator/provider therefore cannot stop a coherent walk.
+    final speedStop =
+        measuredStill &&
+        _corroboratedSpeedAt != null &&
+        timestamp.difference(_corroboratedSpeedAt!).inMilliseconds <= 5000 &&
+        stepSeconds >= 0.5 &&
+        stepSeconds <= 2 &&
+        stepSpeed < 0.2;
+    // A completed observation window IS the confirmation; do not start a
+    // second stationary timer after it. Missing fixes are handled by expire().
+    if (positionStill ||
+        speedStop ||
+        (!walking && measuredStill && !contradictsStill)) {
       _idle();
       _anchor = fix;
       return;
@@ -121,7 +162,7 @@ class CowboyMotion {
       return;
     }
     if (distance < _threshold) {
-      if (walking && progressing && (!measuredStill || contradictsStill)) {
+      if (walking && continuing) {
         _lastMovement = timestamp;
       }
       expire(now);
@@ -139,24 +180,25 @@ class CowboyMotion {
     // The cartographic player walks during credible travel, including a route
     // replay above human walking pace. Clip speed stays capped below; a modest
     // emulator route must not freeze both gait and facing. Jumps still reject.
-    if (travelSpeed < 0.25 ||
+    if (travelSpeed < (walking ? 0.15 : 0.25) ||
         travelSpeed > 12 ||
         seconds < 0.5 ||
-        (windowSeconds >= 2 && !progressing)) {
+        (windowSeconds >= 2 && !continuing)) {
       _idle();
       return;
     }
     final nextHeading = (math.atan2(east, north) * 180 / math.pi + 360) % 360;
     final delta = ((nextHeading - heading + 540) % 360) - 180;
-    if (!walking && _credibleSegments > 0 && delta.abs() > 100) {
-      _credibleSegments = 0;
+    if (!walking && _movementFixes > 0 && delta.abs() > 100) {
+      _movementFixes = 0;
     }
     heading = nextHeading;
-    _credibleSegments++;
+    // Entry requires accumulated displacement AND independent moving fixes.
+    // Once walking, the lower continuing threshold tolerates uneven slow fixes.
     walking =
-        _credibleSegments >= 2 ||
-        (corroborated && measuredSpeed >= 0.5) ||
-        (progressing && windowSeconds >= 3 && !measuredStill);
+        walking ||
+        (_movementFixes >= 2 && continuing) ||
+        (corroborated && measuredSpeed >= 0.5);
     _lastMovement = timestamp;
     speed = travelSpeed;
     playbackRate = (speed / 1.0645109415).clamp(0.8, 1.35);
@@ -186,7 +228,7 @@ class CowboyMotion {
 
   void _idle() {
     walking = false;
-    _credibleSegments = 0;
+    _movementFixes = 0;
     _lastMovement = null;
     speed = 0;
   }
@@ -195,7 +237,7 @@ class CowboyMotion {
     _idle();
     _anchor = null;
     _previous = null;
-    _stationarySeconds = 0;
+    _corroboratedSpeedAt = null;
     cadenceSeconds = 1;
     _recent.clear();
     _lowSpeedAnchor = null;

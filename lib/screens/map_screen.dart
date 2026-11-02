@@ -397,12 +397,6 @@ class _MapScreenState extends State<MapScreen>
     _cowboyMotion.expire(now);
 
     if (wasWalking != _cowboyMotion.walking) {
-      if (!_cowboyMotion.walking) {
-        _travel.pause();
-        _travelTicker.stop();
-        _previousTravelTick = null;
-        _pendingFollowPoint = null;
-      }
       unawaited(_projectCowboy());
     }
   }
@@ -921,12 +915,7 @@ class _MapScreenState extends State<MapScreen>
     }
 
     // Feed smooth travel interpolation.
-    _travel.accept(
-      point,
-      position.timestamp,
-      accuracy: position.accuracy,
-      walking: _cowboyMotion.walking,
-    );
+    _travel.accept(point, position.timestamp, accuracy: position.accuracy);
 
     if (_travel.awaitingReacquisition) {
       _holdTravel('Checking GPS position - showing last known position');

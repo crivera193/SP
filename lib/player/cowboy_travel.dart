@@ -21,7 +21,6 @@ class CowboyTravel {
     CampusPoint point,
     DateTime timestamp, {
     required double accuracy,
-    required bool walking,
   }) {
     if (_timestamp != null && !timestamp.isAfter(_timestamp!)) return false;
     final gap = _timestamp == null
@@ -54,12 +53,10 @@ class CowboyTravel {
       }
       position = target = point;
       _clearCandidate();
-    } else if (walking) {
-      _clearCandidate();
-      target = point;
     } else {
       _clearCandidate();
-      pause();
+      // Position corrections are independent of the animation's walking state.
+      target = point;
     }
     _age = 0;
     return true;
