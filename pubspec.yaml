@@ -24,6 +24,7 @@ flutter:
     - assets/icon/
     - assets/player/cowboy/
     - assets/animations/kitty-island/
+    - assets/animations/plants/
 
   fonts:
     - family: Inter
