@@ -11,6 +11,9 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
 import '../map/campus_geography.dart';
 import '../map/campus_style.dart';
 import '../map/kitty_island.dart';
+import '../map/campus_fix.dart';
+import '../games/game_spot.dart';
+import '../games/spot_proximity.dart';
 import '../widgets/kitty_island_cats.dart';
 import '../player/cowboy_motion.dart';
 import '../player/cowboy_travel.dart';
@@ -90,6 +93,28 @@ class _MapScreenState extends State<MapScreen>
   late final LatestProjection<Offset> _monsteraProjector;
 
   late final LatestProjection<List<Offset>> _kittyProjector;
+
+  // Arrival-only landmarks reuse the existing artwork coordinates. No combat,
+  // rewards or live gameplay records are created by these invitations.
+  final _proximity = SpotProximity(const [
+    GameSpot(
+      id: 'kitty-island',
+      name: 'Kitty Island',
+      point: KittyIsland.center,
+    ),
+    GameSpot(id: 'monstera', name: 'Monstera', point: _monsteraLocation),
+  ]);
+
+  void _updateProximity(void Function() update) {
+    final previousState = _proximity.state;
+    final previousSpot = _proximity.selected?.id;
+    update();
+    if (mounted &&
+        (previousState != _proximity.state ||
+            previousSpot != _proximity.selected?.id)) {
+      setState(() {});
+    }
+  }
 
   final _travel = CowboyTravel();
 
@@ -260,6 +285,7 @@ class _MapScreenState extends State<MapScreen>
     if (state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused) {
       _foreground = false;
+      _updateProximity(_proximity.unavailable);
 
       _syncKittyCats();
       _syncMonsteraLeaf();
@@ -325,6 +351,7 @@ class _MapScreenState extends State<MapScreen>
   // Visibility is independent of freshness: retain only the cosmetic last
   // accepted position. _lastPosition is cleared so it is not a current fix.
   void _holdTravel(String message) {
+    _updateProximity(_proximity.unavailable);
     _cowboyMotion.stop();
     _travel.pause();
     _travelTicker.stop();
@@ -344,6 +371,7 @@ class _MapScreenState extends State<MapScreen>
     }
 
     final now = DateTime.now();
+    _updateProximity(() => _proximity.refresh(now));
     final position = _lastPosition;
 
     if (position != null &&
@@ -491,6 +519,7 @@ class _MapScreenState extends State<MapScreen>
   // ==========================================
 
   Future<void> _load() async {
+    _updateProximity(_proximity.unavailable);
     _kittyProjector.cancel();
     _kittyPlacement.value = null;
     _monsteraProjector.cancel();
@@ -829,6 +858,7 @@ class _MapScreenState extends State<MapScreen>
 
     // Hide Vaquero outside campus.
     if (!campus.contains(point)) {
+      _updateProximity(_proximity.unavailable);
       _cowboyMotion.stop();
       _clearTravel();
 
@@ -876,6 +906,14 @@ class _MapScreenState extends State<MapScreen>
       _holdTravel('Checking GPS position - showing last known position');
       return;
     }
+
+    _updateProximity(
+      () => _proximity.accept(
+        CampusFix(point, position.accuracy, position.timestamp),
+        onCampus: true,
+        now: now,
+      ),
+    );
 
     if (_travel.moving && !_travelTicker.isActive) {
       _previousTravelTick = null;
@@ -1147,6 +1185,39 @@ class _MapScreenState extends State<MapScreen>
           // ==================================
           // GPS AND ZOOM BUTTONS
           // ==================================
+          if (_ready && _foreground && _proximity.state == SpotState.eligible)
+            Positioned(
+              left: 12,
+              right: 76,
+              bottom: 100,
+              child: SafeArea(
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _proximity.selected!.name,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const Text('You have arrived.'),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () =>
+                                _updateProximity(_proximity.dismiss),
+                            child: const Text('Dismiss'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
           if (_ready)
             Positioned(
               right: 12,

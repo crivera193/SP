@@ -89,3 +89,32 @@ a one-second approximately 40 m outlier returning without changing display
 position. Sustained repeated displaced fixes can reacquire, deliberately; this
 is not proof against sustained biased GPS. Native gap capture is ignored
 `tmp/gps-gap-fixed.png`. Outdoor phone accuracy and owner acceptance are pending.
+
+
+### Lottie landmark arrivals — November 1, 2026 (local verification)
+
+Adapted UTRGV-GOTest `lib/games/spot_proximity.dart` and its focused tests for
+SP's existing decorative locations. Kitty Island is one stop for the three cats;
+Monstera is a separate stop. Existing coordinates and Lottie artwork are reused.
+Arrival shows a dismissible card only; no game, reward, combat, account or backend
+change is included. These are local artwork arrival invitations, not new live
+Supabase gameplay points. No new product-location coordinates were introduced.
+
+The existing foreground GPS stream supplies raw fixes after the cowboy jump
+filter. Cosmetic interpolation never grants arrival. Defaults retained from the
+reference: 25 m entry, 40 m exit, at most 15 m reported uncertainty, at most 10 s
+fix age, and 3 s of consistent entry/exit evidence. GPS loss or backgrounding
+revokes eligibility; dismissal stays suppressed until confirmed departure.
+Animations remain independent of proximity. SP's existing 6 s GPS expiry also
+revokes eligibility before the proximity engine's 10 s maximum.
+
+Validation: analysis clean, all 25 tests passed. Fresh Android map-only debug
+verification build installed in place on UTRGV_GO_Preview/emulator-5554,
+1080x2400, package com.example.campus_app.spverify. Native UI showed Kitty Island
+and Monstera arrival cards with their existing artwork, Dismiss stayed suppressed
+near Kitty Island, GPS delivery pause removed eligibility while retaining the
+last-known cowboy, and returning after departure re-triggered Kitty Island.
+GPS subscription was resumed after the test. Synthetic emulator coordinates only;
+real phone GPS and authenticated app flow remain unverified for this change.
+APK SHA-256: 36f396649de94ae20f6995a1e8f69c79e739526e4c7b501d46366e4594879bf6.
+Source baseline b53308c plus the local arrival implementation; not pushed.
