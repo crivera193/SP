@@ -33,18 +33,20 @@ class CowboyTravel {
           point; // Reacquisition, not a guessed intervening route.
     } else if (gap > 8 ||
         CampusGeography.distance(target ?? position!, point) >
-            math.max(6.0, math.min(12.0, accuracy * 0.5) + gap * 3)) {
-      // One distant reading is not a relocation. Require a small, consistent
-      // cluster over time, including when reacquiring after signal loss.
+            math.max(6.0, math.min(12.0, accuracy * 0.5) + gap * 12)) {
+      // Confirm consecutive plausible readings, including a moving route.
+      // Comparing every fix to the first candidate would lock out movement.
       if (_candidate == null ||
           CampusGeography.distance(_candidate!, point) >
-              math.max(2.0, math.min(5.0, accuracy * 0.25))) {
+              math.max(2.0, math.min(5.0, accuracy * 0.25)) + gap * 12 ||
+          gap > 8) {
         _candidate = point;
         _candidateSince = timestamp;
         _candidateCount = 1;
       } else {
         _candidateCount++;
       }
+      _candidate = point;
       pause();
       if (_candidateCount < 3 ||
           timestamp.difference(_candidateSince!).inMilliseconds < 2000) {

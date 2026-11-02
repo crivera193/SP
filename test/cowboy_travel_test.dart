@@ -281,6 +281,47 @@ void main() {
     expect(motion.heading, closeTo(0, 1));
   });
 
+  test('reacquisition accepts a moving route without waiting for a stop', () {
+    for (final speed in [1.2, 4.3, 10.0]) {
+      final travel = CowboyTravel();
+      travel.accept(
+        const CampusPoint(0, 0),
+        epoch,
+        accuracy: 5,
+        walking: false,
+      );
+      for (var t = 1; t <= 3; t++) {
+        final accepted = travel.accept(
+          CampusPoint((40 + speed * t) / 111320, 0),
+          epoch.add(Duration(seconds: t)),
+          accuracy: 5,
+          walking: true,
+        );
+        expect(accepted, t == 3, reason: 'speed $speed, fix $t');
+      }
+      expect(travel.awaitingReacquisition, isFalse);
+      for (var t = 4; t <= 12; t++) {
+        travel.accept(
+          CampusPoint((40 + speed * t) / 111320, 0),
+          epoch.add(Duration(seconds: t)),
+          accuracy: 5,
+          walking: true,
+        );
+        expect(
+          travel.awaitingReacquisition,
+          isFalse,
+          reason: 'continuous speed $speed, fix $t',
+        );
+        travel.advance(1);
+      }
+      expect(travel.awaitingReacquisition, isFalse);
+      expect(
+        CampusGeography.distance(const CampusPoint(0, 0), travel.position!),
+        closeTo(40 + speed * 12, .2),
+      );
+    }
+  });
+
   test('idle location jitter does not produce cosmetic travel', () {
     final travel = CowboyTravel();
     const origin = CampusPoint(0, 0);
