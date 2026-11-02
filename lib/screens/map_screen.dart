@@ -75,10 +75,13 @@ class _MapScreenState extends State<MapScreen>
   // GPS STATE
   // ==========================================
 
-  bool _following = false;
+  bool _following = true;
   bool _locating = false;
 
   gps.Position? _lastPosition;
+  gps.Position? _pendingGps;
+  Future<void> _gpsOperations = Future<void>.value();
+  int _gpsGeneration = 0;
   StreamSubscription<gps.Position>? _gpsSubscription;
 
   final _kittyPlacement = ValueNotifier<List<Offset>?>(null);
@@ -252,6 +255,9 @@ class _MapScreenState extends State<MapScreen>
 
     if (hasMapboxConfiguration) {
       unawaited(_load());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _foreground) unawaited(_startGps(allowPrompt: true));
+      });
     }
   }
 
@@ -261,7 +267,7 @@ class _MapScreenState extends State<MapScreen>
 
     _expiry?.cancel();
 
-    unawaited(_gpsSubscription?.cancel());
+    unawaited(_stopGps());
 
     _travelTicker.dispose();
 
@@ -284,7 +290,10 @@ class _MapScreenState extends State<MapScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused) {
+      if (!_foreground) return;
       _foreground = false;
+      _pendingGps = null;
+      unawaited(_stopGps());
       _updateProximity(_proximity.unavailable);
 
       _syncKittyCats();
@@ -294,7 +303,9 @@ class _MapScreenState extends State<MapScreen>
       _cowboyMotion.stop();
       _lastPosition = null;
     } else if (state == AppLifecycleState.resumed) {
+      if (_foreground) return;
       _foreground = true;
+      if (hasMapboxConfiguration) unawaited(_startGps());
 
       _syncKittyCats();
       _syncMonsteraLeaf();
@@ -664,6 +675,9 @@ class _MapScreenState extends State<MapScreen>
       _syncKittyCats();
       _syncMonsteraLeaf();
 
+      final pending = _pendingGps;
+      _pendingGps = null;
+      if (pending != null) _onGpsFix(pending);
       unawaited(_projectCowboy());
     } catch (error) {
       debugPrint('Mapbox setup error: $error');
@@ -708,99 +722,106 @@ class _MapScreenState extends State<MapScreen>
   // START GPS FOLLOWING
   // ==========================================
 
-  Future<void> _beginGpsFollow() async {
-    if (_locating || !_ready) return;
-
-    setState(() {
-      _locating = true;
-      _locationMessage = null;
+  Future<void> _queueGps(Future<void> Function() operation) {
+    // Cancellation completes before a new stream starts, including rapid resume.
+    final next = _gpsOperations.then((_) => operation());
+    _gpsOperations = next.catchError((Object error) {
+      debugPrint('GPS lifecycle operation failed: $error');
     });
+    return _gpsOperations;
+  }
 
-    try {
-      final enabled = await gps.Geolocator.isLocationServiceEnabled();
+  Future<void> _stopGps() {
+    _gpsGeneration++;
+    return _queueGps(() async {
+      final subscription = _gpsSubscription;
+      _gpsSubscription = null;
+      await subscription?.cancel();
+    });
+  }
 
-      if (!enabled) {
-        throw StateError('Enable location services on your device.');
-      }
-
-      var permission = await gps.Geolocator.checkPermission();
-
-      if (permission == gps.LocationPermission.denied) {
-        permission = await gps.Geolocator.requestPermission();
-      }
-
-      if (permission == gps.LocationPermission.denied ||
-          permission == gps.LocationPermission.deniedForever) {
-        throw StateError('Location permission is required.');
-      }
-
-      if (!mounted) return;
-
+  Future<void> _startGps({bool allowPrompt = false}) {
+    final generation = _gpsGeneration;
+    bool current() => mounted && _foreground && generation == _gpsGeneration;
+    return _queueGps(() async {
+      if (!current() || _gpsSubscription != null) return;
       setState(() {
-        _following = true;
-        _followNeedsZoom = true;
+        _locating = true;
+        _locationMessage = 'Finding your location...';
       });
-
-      _expireGps();
-
-      final currentPosition = _travel.position;
-
-      if (currentPosition != null) {
-        await _followPosition(currentPosition);
-      }
-
-      if (_gpsSubscription != null) {
-        return;
-      }
-
-      _gpsSubscription =
-          gps.Geolocator.getPositionStream(
-            locationSettings: Platform.isAndroid
-                ? gps.AndroidSettings(
-                    accuracy: gps.LocationAccuracy.high,
-                    distanceFilter: _gpsDistanceFilterMeters,
-                    intervalDuration: _androidGpsInterval,
-                  )
-                : const gps.LocationSettings(
-                    accuracy: gps.LocationAccuracy.high,
-                    distanceFilter: _gpsDistanceFilterMeters,
-                  ),
-          ).listen(
-            _onGpsFix,
-
-            onError: (Object error) {
-              if (mounted) {
-                _holdTravel('GPS unavailable - showing last known position');
-              }
-
-              debugPrint('GPS stream error: $error');
-            },
-
-            onDone: () {
-              _gpsSubscription = null;
-
-              if (mounted) {
-                _holdTravel('GPS unavailable - showing last known position');
-              }
-            },
+      try {
+        final enabled = await gps.Geolocator.isLocationServiceEnabled();
+        if (!current()) return;
+        if (!enabled) {
+          throw StateError('Enable location services on your device.');
+        }
+        var permission = await gps.Geolocator.checkPermission();
+        if (!current()) return;
+        if (permission == gps.LocationPermission.denied && allowPrompt) {
+          permission = await gps.Geolocator.requestPermission();
+          if (!current()) return;
+        }
+        if (permission == gps.LocationPermission.deniedForever) {
+          throw StateError(
+            'Location permission is blocked. Enable it in app settings.',
           );
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _following = false;
+        }
+        if (permission == gps.LocationPermission.denied) {
+          throw StateError('Location permission is required.');
+        }
+        _gpsSubscription =
+            gps.Geolocator.getPositionStream(
+              locationSettings: Platform.isAndroid
+                  ? gps.AndroidSettings(
+                      accuracy: gps.LocationAccuracy.high,
+                      distanceFilter: _gpsDistanceFilterMeters,
+                      intervalDuration: _androidGpsInterval,
+                    )
+                  : const gps.LocationSettings(
+                      accuracy: gps.LocationAccuracy.high,
+                      distanceFilter: _gpsDistanceFilterMeters,
+                    ),
+            ).listen(
+              (position) {
+                if (current()) _onGpsFix(position);
+              },
+              onError: (Object error) {
+                if (!current()) return;
+                _holdTravel('GPS unavailable - showing last known position');
+                unawaited(_stopGps());
+              },
+              onDone: () {
+                if (!current()) return;
+                _gpsSubscription = null;
+                _holdTravel('GPS unavailable - showing last known position');
+              },
+            );
+      } catch (error) {
+        if (current()) {
+          setState(() {
+            _locationMessage = error is StateError
+                ? error.message
+                : 'Could not start GPS.';
+          });
+        }
+      } finally {
+        if (mounted) setState(() => _locating = false);
+      }
+    });
+  }
 
-          _locationMessage = error is StateError
-              ? error.message
-              : 'Could not start GPS.';
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _locating = false;
-        });
-      }
-    }
+  Future<void> _retryGps() async {
+    await _stopGps();
+    if (mounted && _foreground) await _startGps(allowPrompt: true);
+  }
+
+  void _beginGpsFollow() {
+    setState(() {
+      _following = true;
+      _followNeedsZoom = true;
+    });
+    final position = _travel.position;
+    if (position != null) unawaited(_followPosition(position));
   }
 
   // ==========================================
@@ -822,7 +843,12 @@ class _MapScreenState extends State<MapScreen>
   // ==========================================
 
   void _onGpsFix(gps.Position position) {
-    if (!mounted || !_ready || !_foreground) {
+    if (!mounted || !_foreground) return;
+    if (!_ready) {
+      if (_pendingGps == null ||
+          position.timestamp.isAfter(_pendingGps!.timestamp)) {
+        _pendingGps = position;
+      }
       return;
     }
 
@@ -1179,8 +1205,11 @@ class _MapScreenState extends State<MapScreen>
           // ==================================
           // ANIMATED VAQUERO
           // ==================================
-          if (_ready)
-            CowboySprite(motion: _cowboyMotion, placement: _cowboyPlacement),
+          CowboySprite(
+            motion: _cowboyMotion,
+            placement: _cowboyPlacement,
+            active: _ready && _foreground,
+          ),
 
           // ==================================
           // GPS AND ZOOM BUTTONS
@@ -1242,7 +1271,7 @@ class _MapScreenState extends State<MapScreen>
                               if (_following) {
                                 _stopFollowing();
                               } else {
-                                unawaited(_beginGpsFollow());
+                                _beginGpsFollow();
                               }
                             },
 
@@ -1302,10 +1331,20 @@ class _MapScreenState extends State<MapScreen>
                 child: Padding(
                   padding: const EdgeInsets.all(10),
 
-                  child: Text(
-                    _locationMessage!,
-
-                    style: const TextStyle(fontSize: 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _locationMessage!,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      if (!_locating && _gpsSubscription == null)
+                        TextButton(
+                          onPressed: _retryGps,
+                          child: const Text('Retry GPS'),
+                        ),
+                    ],
                   ),
                 ),
               ),

@@ -118,3 +118,45 @@ GPS subscription was resumed after the test. Synthetic emulator coordinates only
 real phone GPS and authenticated app flow remain unverified for this change.
 APK SHA-256: 36f396649de94ae20f6995a1e8f69c79e739526e4c7b501d46366e4594879bf6.
 Source baseline b53308c plus the local arrival implementation; not pushed.
+
+
+### Automatic foreground GPS startup — November 2, 2026 (local)
+
+MapScreen now starts its existing Geolocator stream automatically after its first
+frame, concurrently with campus/style loading. The newest early fix is buffered
+until map preparation completes, then revalidated through the normal timestamp,
+accuracy and campus checks. CowboySprite mounts during loading so its assets can
+load concurrently, but remains inactive until map readiness. Initial following
+centers on the accepted fix; the follow button controls the camera independently.
+No tracking starts at the signed-out login screen and no background permission or
+new package is introduced. This supersedes the previous manual-GPS-button startup.
+
+GPS start/cancellation is serialized with generation guards against late callbacks.
+Hidden/paused cancels collection once, clears pending fixes and proximity, and
+resume checks services/permission before restarting without repeating permission
+prompts. Explicit Retry GPS permits a new permission request. Missing location
+shows an acquisition/status message rather than inventing a position. Rendering
+and fix acquisition remain independent; immediate or exact GPS is not guaranteed.
+
+Verification: all 25 existing tests passed, analysis clean, diff check clean.
+Fresh Android x86_64 map-only debug preview installed in place on emulator-5554
+(UTRGV_GO_Preview, 1080x2400). On a cold app launch with permission already granted,
+location/following started without a button tap; a projected cowboy placement was
+observed by 6.92 s from launch and visually confirmed at Kitty Island. The native
+continuous synthetic walk/stop check passed. Background inspection showed no GPS
+subscription and no proximity eligibility; foreground return automatically
+restored GPS and cowboy visibility. Camera-follow-off interaction was not verified
+because concurrent owner input prevented the attempted click. First-time/denied
+permission, disabled services and iOS runtime behavior remain unverified.
+
+The universal and x64 updates initially hit emulator storage limits. Android cache
+trim and removal of only SP preview's disposable hot-reload kernel/snapshot files
+allowed the x64 in-place update; no app data was cleared or app uninstalled.
+Installed APK SHA-256 matched the fresh local artifact:
+218524fee6b503e79536288c783d4e71cc3a15ad70f89b31bdff9d1dac0145d8.
+Source baseline ca51f32 plus local startup changes. Not committed or pushed.
+
+Launcher confusion was also resolved: current SP Map Verification is pinned in
+the lower-right dock instead of a changing suggested-app slot. The older UTRGV-GO
+shortcut is separately labeled on the home grid above YouTube. Both shortcuts were
+opened and their foreground package identities checked; neither app was removed.
