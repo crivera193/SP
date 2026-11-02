@@ -272,6 +272,22 @@ class _MapScreenState extends State<MapScreen>
   // EXPIRE STALE GPS
   // ==========================================
 
+  // Visibility is independent of freshness: retain only the cosmetic last
+  // accepted position. _lastPosition is cleared so it is not a current fix.
+  void _holdTravel(String message) {
+    _cowboyMotion.stop();
+    _travel.pause();
+    _travelTicker.stop();
+    _previousTravelTick = null;
+    _pendingFollowPoint = null;
+    _projector.cancel();
+    setState(() {
+      _lastPosition = null;
+      _locationMessage = message;
+    });
+    unawaited(_projectCowboy());
+  }
+
   void _expireGps() {
     if (!mounted || !_foreground) {
       return;
@@ -282,13 +298,7 @@ class _MapScreenState extends State<MapScreen>
 
     if (position != null &&
         now.difference(position.timestamp).inMilliseconds > 6000) {
-      _cowboyMotion.stop();
-      _clearTravel();
-
-      setState(() {
-        _lastPosition = null;
-        _locationMessage = 'GPS update is stale - waiting for location';
-      });
+      _holdTravel('Waiting for GPS - showing last known position');
 
       return;
     }
@@ -298,6 +308,12 @@ class _MapScreenState extends State<MapScreen>
     _cowboyMotion.expire(now);
 
     if (wasWalking != _cowboyMotion.walking) {
+      if (!_cowboyMotion.walking) {
+        _travel.pause();
+        _travelTicker.stop();
+        _previousTravelTick = null;
+        _pendingFollowPoint = null;
+      }
       unawaited(_projectCowboy());
     }
   }
@@ -672,14 +688,7 @@ class _MapScreenState extends State<MapScreen>
 
             onError: (Object error) {
               if (mounted) {
-                _cowboyMotion.stop();
-                _clearTravel();
-
-                setState(() {
-                  _following = false;
-                  _lastPosition = null;
-                  _locationMessage = 'GPS updates unavailable.';
-                });
+                _holdTravel('GPS unavailable - showing last known position');
               }
 
               debugPrint('GPS stream error: $error');
@@ -689,13 +698,7 @@ class _MapScreenState extends State<MapScreen>
               _gpsSubscription = null;
 
               if (mounted) {
-                _cowboyMotion.stop();
-                _clearTravel();
-
-                setState(() {
-                  _lastPosition = null;
-                  _locationMessage = 'GPS updates unavailable.';
-                });
+                _holdTravel('GPS unavailable - showing last known position');
               }
             },
           );
@@ -759,14 +762,7 @@ class _MapScreenState extends State<MapScreen>
         !position.longitude.isFinite ||
         position.latitude.abs() > 90 ||
         position.longitude.abs() > 180) {
-      _cowboyMotion.stop();
-      _clearTravel();
-
-      setState(() {
-        _lastPosition = null;
-
-        _locationMessage = 'Waiting for a fresh, accurate GPS position.';
-      });
+      _holdTravel('Waiting for accurate GPS - showing last known position');
 
       return;
     }
@@ -822,6 +818,11 @@ class _MapScreenState extends State<MapScreen>
       accuracy: position.accuracy,
       walking: _cowboyMotion.walking,
     );
+
+    if (_travel.awaitingReacquisition) {
+      _holdTravel('Checking GPS position - showing last known position');
+      return;
+    }
 
     if (_travel.moving && !_travelTicker.isActive) {
       _previousTravelTick = null;
@@ -927,8 +928,7 @@ class _MapScreenState extends State<MapScreen>
         position == null ||
         !_ready ||
         !mounted ||
-        !_foreground ||
-        _lastPosition == null) {
+        !_foreground) {
       return null;
     }
 

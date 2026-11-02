@@ -61,3 +61,31 @@ full 432x960 widget-rendered cat view. Android debug build passed, and packaged
 cat assets/source matched the checkout. Native map placement remains unverified
 because the preview emulator is still not answering Android shell commands; no
 new install was attempted. Dependency resolution uses Flutter 3.47.7's SDK pins.
+
+
+## Local GPS drift/idle revision — pending owner test
+
+October 26, 2026, local changes on SP base `1f905f8`; not committed or pushed.
+The existing motion detector now checks short-window progression and valid speed
+uncertainty. Idle fixes hold cosmetic travel; isolated distant fixes wait for a
+consistent reacquisition cluster. A stale/poor fix pauses animation and retains
+the last accepted display position with a visible uncertainty message, while
+clearing the current-fix field. Background/campus-exit clearing remains intact.
+No additional location providers, sensors, permissions or filter packages added.
+
+Validation: all 15 tests pass and scoped Flutter analysis is clean. New cases
+cover stationary jitter, noisy stops, slow walking, a provider stuck at zero,
+turns, isolated jumps, reacquisition and interrupted interpolation. The Android
+debug verification APK matches the local source and unchanged cowboy assets,
+SHA-256 `3a780659404083383c02d1921b7260ea4173c33835d95a97788fd4f70cb692d9`.
+Installed in place to the separate `com.example.campus_app.spverify` preview on
+UTRGV_GO_Preview/emulator-5554; account/login flow is bypassed by the ignored
+map-only test entrypoint. The normal app and phone were not replaced.
+
+Native checks observed: synthetic eastward 1.2 m/s walking and northward restart,
+stationary jitter returning to visible idle, eight seconds of paused GPS delivery
+showing last-known/idle with no current fix, recovery clearing the message, and
+a one-second approximately 40 m outlier returning without changing display
+position. Sustained repeated displaced fixes can reacquire, deliberately; this
+is not proof against sustained biased GPS. Native gap capture is ignored
+`tmp/gps-gap-fixed.png`. Outdoor phone accuracy and owner acceptance are pending.

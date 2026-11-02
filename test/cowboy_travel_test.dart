@@ -193,4 +193,187 @@ void main() {
       expect(applied, [3]);
     },
   );
+  void sample(
+    CowboyMotion motion,
+    int second,
+    double east, {
+    double north = 0,
+    double? providerSpeed,
+    double? providerAccuracy,
+  }) {
+    final now = epoch.add(Duration(seconds: second));
+    motion.expire(now);
+    motion.accept(
+      longitude: east / 111320,
+      latitude: north / 111320,
+      accuracy: 12,
+      timestamp: now,
+      now: now,
+      onCampus: true,
+      measuredSpeed: providerSpeed,
+      speedAccuracy: providerAccuracy,
+    );
+  }
+
+  test(
+    'stationary GPS jitter with reliable zero speed never starts walking',
+    () {
+      final motion = CowboyMotion();
+      const noise = [0.0, 2.0, -1.5, 1.0, -2.0, 0.5];
+      for (var t = 0; t < 30; t++) {
+        sample(
+          motion,
+          t,
+          noise[t % noise.length],
+          providerSpeed: 0,
+          providerAccuracy: 0.15,
+        );
+        expect(motion.walking, isFalse, reason: 'stationary sample $t');
+      }
+    },
+  );
+
+  test('walk then noisy stop without speed settles and stays idle', () {
+    final motion = CowboyMotion();
+    for (var t = 0; t <= 12; t++) {
+      sample(motion, t, t * 1.2);
+    }
+    expect(motion.walking, isTrue);
+    const noise = [0.5, -0.7, 0.8, -0.6, 0.2, 0.0];
+    for (var t = 13; t <= 36; t++) {
+      sample(motion, t, 14.4 + noise[(t - 13) % noise.length]);
+      if (t >= 20) expect(motion.walking, isFalse, reason: 'noisy stop $t');
+    }
+    for (var t = 37; t <= 46; t++) {
+      sample(motion, t, 14.4 + (t - 36) * 1.2);
+    }
+    expect(motion.walking, isTrue);
+  });
+
+  test('slow walking without provider speed is not frozen as stationary', () {
+    final motion = CowboyMotion();
+    for (var t = 0; t <= 20; t++) {
+      sample(motion, t, t * 0.35);
+      if (t >= 12) expect(motion.walking, isTrue, reason: 'slow sample $t');
+    }
+  });
+
+  test(
+    'a provider stuck at zero does not veto substantial sustained travel',
+    () {
+      final motion = CowboyMotion();
+      for (var t = 0; t <= 18; t++) {
+        sample(motion, t, t * 1.2, providerSpeed: 0, providerAccuracy: 0.1);
+      }
+      expect(motion.walking, isTrue);
+    },
+  );
+
+  test('normal walk and courtyard turn retain movement', () {
+    final motion = CowboyMotion();
+    for (var t = 0; t <= 10; t++) {
+      sample(motion, t, t * 1.2);
+    }
+    for (var t = 11; t <= 18; t++) {
+      sample(motion, t, 12, north: (t - 10) * 1.2);
+    }
+    expect(motion.walking, isTrue);
+    expect(motion.heading, closeTo(0, 1));
+  });
+
+  test('idle location jitter does not produce cosmetic travel', () {
+    final travel = CowboyTravel();
+    const origin = CampusPoint(0, 0);
+    travel.accept(origin, epoch, accuracy: 20, walking: false);
+    for (var t = 1; t <= 20; t++) {
+      travel.accept(
+        CampusPoint((t.isEven ? 2.0 : -2.0) / 111320, 0),
+        epoch.add(Duration(seconds: t)),
+        accuracy: 20,
+        walking: false,
+      );
+      travel.advance(1);
+      expect(travel.position, same(origin));
+      expect(travel.moving, isFalse);
+    }
+  });
+
+  test('one large outlier is held and returning fixes recover normally', () {
+    final travel = CowboyTravel();
+    const origin = CampusPoint(0, 0);
+    travel.accept(origin, epoch, accuracy: 5, walking: false);
+    expect(
+      travel.accept(
+        CampusPoint(40 / 111320, 0),
+        epoch.add(const Duration(seconds: 1)),
+        accuracy: 5,
+        walking: true,
+      ),
+      isFalse,
+    );
+    expect(travel.awaitingReacquisition, isTrue);
+    expect(travel.position, same(origin));
+    travel.accept(
+      CampusPoint(1.2 / 111320, 0),
+      epoch.add(const Duration(seconds: 2)),
+      accuracy: 5,
+      walking: true,
+    );
+    travel.advance(1);
+    expect(travel.awaitingReacquisition, isFalse);
+    expect(
+      CampusGeography.distance(origin, travel.position!),
+      closeTo(1.2, .01),
+    );
+  });
+
+  test(
+    'consistent new location can reacquire without permanently freezing',
+    () {
+      final travel = CowboyTravel();
+      const origin = CampusPoint(0, 0);
+      final relocated = CampusPoint(40 / 111320, 0);
+      travel.accept(origin, epoch, accuracy: 5, walking: false);
+      for (var t = 10; t <= 12; t++) {
+        final accepted = travel.accept(
+          relocated,
+          epoch.add(Duration(seconds: t)),
+          accuracy: 5,
+          walking: false,
+        );
+        expect(accepted, t == 12);
+        if (t < 12) expect(travel.position, same(origin));
+      }
+      expect(travel.position, same(relocated));
+      expect(travel.awaitingReacquisition, isFalse);
+    },
+  );
+
+  test(
+    'stopping cancels unfinished interpolation without clearing position',
+    () {
+      final travel = CowboyTravel();
+      travel.accept(
+        const CampusPoint(0, 0),
+        epoch,
+        accuracy: 5,
+        walking: false,
+      );
+      travel.accept(
+        CampusPoint(2 / 111320, 0),
+        epoch.add(const Duration(seconds: 1)),
+        accuracy: 5,
+        walking: true,
+      );
+      travel.advance(.1);
+      final stopped = travel.position;
+      travel.pause();
+      for (var i = 0; i < 100; i++) {
+        travel.advance(.1);
+      }
+      expect(travel.position, same(stopped));
+      expect(stopped, isNotNull);
+      expect(travel.moving, isFalse);
+    },
+  );
 }

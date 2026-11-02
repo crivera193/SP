@@ -9,6 +9,8 @@ class CowboyMotion {
   DateTime? _lastMovement;
   int _credibleSegments = 0;
   double _stationarySeconds = 0, _threshold = 1.8;
+  final List<_MotionFix> _recent = [];
+  _MotionFix? _lowSpeedAnchor;
 
   void accept({
     required double longitude,
@@ -36,17 +38,35 @@ class CowboyMotion {
     }
     final fix = _MotionFix(longitude, latitude, accuracy, timestamp);
     final previous = _previous;
+    var interval = 0.0;
     if (previous != null) {
-      final interval =
-          timestamp.difference(previous.time).inMilliseconds / 1000;
+      interval = timestamp.difference(previous.time).inMilliseconds / 1000;
       if (interval > 8) {
         stop();
       } else {
         cadenceSeconds = (cadenceSeconds * 0.5 + interval * 0.5).clamp(0.5, 6);
-        final step = _distance(previous, fix);
-        _stationarySeconds = step < 0.5 ? _stationarySeconds + interval : 0;
       }
     }
+    _recent.add(fix);
+    _recent.removeWhere(
+      (p) => timestamp.difference(p.time).inMilliseconds > 3000,
+    );
+    if (_recent.length > 32) _recent.removeAt(0);
+    final windowSeconds =
+        timestamp.difference(_recent.first.time).inMilliseconds / 1000;
+    final net = _distance(_recent.first, fix);
+    var path = 0.0;
+    for (var i = 1; i < _recent.length; i++) {
+      path += _distance(_recent[i - 1], _recent[i]);
+    }
+    // A short coherent progression can be slow walking. Back-and-forth GPS
+    // noise should not count as sustained motion just because each step is big.
+    final progressing =
+        windowSeconds >= 2 &&
+        net >= 0.8 &&
+        net / windowSeconds >= 0.25 &&
+        path > 0 &&
+        net / path >= 0.65;
     _previous = fix;
     final anchor = _anchor;
     _anchor ??= fix;
@@ -68,10 +88,28 @@ class CowboyMotion {
       1.8,
       math.min(3.5, math.max(accuracy, anchor.accuracy) * 0.15),
     );
-    if (_stationarySeconds >= math.max(1.8, cadenceSeconds * 1.5) ||
-        (hasSpeed &&
-            measuredSpeed < 0.25 &&
-            _stationarySeconds >= cadenceSeconds)) {
+    final measuredStill = hasSpeed && measuredSpeed + speedAccuracy <= 0.45;
+    if (measuredStill) {
+      _lowSpeedAnchor ??= fix;
+    } else {
+      _lowSpeedAnchor = null;
+    }
+    // A stuck provider speed must not veto a sustained, substantial real walk.
+    final contradictsStill =
+        progressing &&
+        _lowSpeedAnchor != null &&
+        timestamp.difference(_lowSpeedAnchor!.time).inMilliseconds >= 3000 &&
+        _distance(_lowSpeedAnchor!, fix) >=
+            math.max(3.5, math.min(8.0, accuracy * 0.5));
+    final positionStill =
+        windowSeconds >= 2 &&
+        !progressing &&
+        net <= math.max(1.0, math.min(2.0, accuracy * 0.1));
+    final stillEvidence = (measuredStill && !contradictsStill) || positionStill;
+    _stationarySeconds = stillEvidence
+        ? _stationarySeconds + interval.clamp(0.0, 3.0)
+        : 0;
+    if (_stationarySeconds >= 2.0) {
       _idle();
       _anchor = fix;
       return;
@@ -83,6 +121,9 @@ class CowboyMotion {
       return;
     }
     if (distance < _threshold) {
+      if (walking && progressing && (!measuredStill || contradictsStill)) {
+        _lastMovement = timestamp;
+      }
       expire(now);
       return;
     }
@@ -98,7 +139,10 @@ class CowboyMotion {
     // The cartographic player walks during credible travel, including a route
     // replay above human walking pace. Clip speed stays capped below; a modest
     // emulator route must not freeze both gait and facing. Jumps still reject.
-    if (travelSpeed < 0.45 || travelSpeed > 12 || seconds < 0.5) {
+    if (travelSpeed < 0.25 ||
+        travelSpeed > 12 ||
+        seconds < 0.5 ||
+        (windowSeconds >= 2 && !progressing)) {
       _idle();
       return;
     }
@@ -109,7 +153,10 @@ class CowboyMotion {
     }
     heading = nextHeading;
     _credibleSegments++;
-    walking = _credibleSegments >= 2 || (corroborated && measuredSpeed >= 0.5);
+    walking =
+        _credibleSegments >= 2 ||
+        (corroborated && measuredSpeed >= 0.5) ||
+        (progressing && windowSeconds >= 3 && !measuredStill);
     _lastMovement = timestamp;
     speed = travelSpeed;
     playbackRate = (speed / 1.0645109415).clamp(0.8, 1.35);
@@ -150,6 +197,8 @@ class CowboyMotion {
     _previous = null;
     _stationarySeconds = 0;
     cadenceSeconds = 1;
+    _recent.clear();
+    _lowSpeedAnchor = null;
   }
 
   static double _distance(_MotionFix a, _MotionFix b) {

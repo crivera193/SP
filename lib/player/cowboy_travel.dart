@@ -8,6 +8,10 @@ class CowboyTravel {
   CampusPoint? position, target;
   DateTime? _timestamp;
   double _age = 0;
+  CampusPoint? _candidate;
+  DateTime? _candidateSince;
+  int _candidateCount = 0;
+  bool get awaitingReacquisition => _candidate != null;
   bool get moving =>
       position != null &&
       target != null &&
@@ -24,15 +28,36 @@ class CowboyTravel {
         ? 0
         : timestamp.difference(_timestamp!).inMilliseconds / 1000;
     _timestamp = timestamp;
-    if (position == null ||
-        gap > 8 ||
-        CampusGeography.distance(position!, point) > 25) {
+    if (position == null) {
       position = target =
           point; // Reacquisition, not a guessed intervening route.
-    } else if (walking ||
-        CampusGeography.distance(position!, point) >
-            math.min(0.8, accuracy * 0.04)) {
+    } else if (gap > 8 ||
+        CampusGeography.distance(target ?? position!, point) >
+            math.max(6.0, math.min(12.0, accuracy * 0.5) + gap * 3)) {
+      // One distant reading is not a relocation. Require a small, consistent
+      // cluster over time, including when reacquiring after signal loss.
+      if (_candidate == null ||
+          CampusGeography.distance(_candidate!, point) >
+              math.max(2.0, math.min(5.0, accuracy * 0.25))) {
+        _candidate = point;
+        _candidateSince = timestamp;
+        _candidateCount = 1;
+      } else {
+        _candidateCount++;
+      }
+      pause();
+      if (_candidateCount < 3 ||
+          timestamp.difference(_candidateSince!).inMilliseconds < 2000) {
+        return false;
+      }
+      position = target = point;
+      _clearCandidate();
+    } else if (walking) {
+      _clearCandidate();
       target = point;
+    } else {
+      _clearCandidate();
+      pause();
     }
     _age = 0;
     return true;
@@ -66,5 +91,12 @@ class CowboyTravel {
     position = target = null;
     _timestamp = null;
     _age = 0;
+    _clearCandidate();
+  }
+
+  void _clearCandidate() {
+    _candidate = null;
+    _candidateSince = null;
+    _candidateCount = 0;
   }
 }
