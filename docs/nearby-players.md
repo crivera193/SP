@@ -140,6 +140,33 @@ SP source `7408a5e` was built and launched on both physical phones:
 These current iOS build observations supersede the earlier unavailable-Mac limit.
 Detailed current device evidence is kept in ignored `output/nearby/`.
 
+### Observed Bluetooth and lifecycle results
+
+On the above physical builds, both foreground phones displayed **1 nearby / 0 on
+map**. This occurred with actual GPS rejected outside campus, so no map position
+was available to establish discovery. No synthetic encounter/receipt was inserted
+for this phone test. Evidence: `android-ble-discovery-pass.png` and
+`iphone-ble-discovery-pass.png` in the ignored evidence directory.
+
+The owner then returned the iPhone to Home. Android changed to **Bluetooth on / no
+players detected** (`android-after-iphone-background.png`). Reopening the iPhone
+restored **1 nearby** on both phones (`android-after-iphone-resume.png`,
+`iphone-after-resume.png`). Android was then sent to its actual launcher; the
+resumed activity was verified as the Samsung launcher. The iPhone changed to
+**Bluetooth on / no players detected** (`iphone-after-android-background.png`).
+Returning Android to SP restored **1 nearby** on both phones again
+(`android-final-resumed.png`, `iphone-final-resumed.png`). Both apps were left
+foreground with discovery enabled. These observations establish cross-platform
+foreground discovery, withdrawal on each platform's background transition, and
+fresh rediscovery on each platform's resume for this device pair.
+
+Still unverified physically: on-campus GPS marker placement/updates, range loss,
+radio off, internet interruption, force quit, sign-out/account switching under
+discovery, same-platform pairs and crowd capacity. Automated tests cover several
+of these contracts but do not replace device observations. The owner also found
+the green **Turn on** action easy to mistake for an enabled-state indicator; this
+usability issue is recorded, and no UI revision was deployed during this test.
+
 ## Platform references
 
 - [Plugin version and central/peripheral API matrix](https://pub.dev/packages/bluetooth_low_energy/versions/6.2.1)
