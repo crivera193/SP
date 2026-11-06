@@ -113,6 +113,33 @@ sign-out/account switch, stale GPS and crowded-campus load. No connected Mac was
 available and an Android emulator cannot prove BLE interoperability. Do not claim
 the feature is device-verified until these checks are observed on current builds.
 
+### Physical-phone update on November 6
+
+SP source `7408a5e` was built and launched on both physical phones:
+
+- Samsung SM-S948U1: release build 12050, separate package
+  `com.example.campus_app.spverify`, label SP Bluetooth Test. Installed APK SHA-256
+  matched `a14d9373e158e44c24b7a684d339c889cce52aa7d5a9d197265f6d58623a4fca`.
+  The original testing app retained build 12049 and its October 23 update time.
+- iPhone 13 Pro Max: Xcode Release build 3, bundle `com.example.campusApp`, original
+  development team/profile verified, signature verification passed, in-place
+  installation and launch succeeded. Native Bluetooth plugin compilation passed.
+- The background SSH build failed signing. Reusing the previously demonstrated
+  Mac Terminal `.command` execution method signed the same source successfully.
+  No signing credentials, passwords or key permissions were changed.
+- At the owner's renewed request, two dedicated test accounts were created through
+  SP's normal signup API, with existing autoconfirm enabled. No confirmation emails
+  were sent. Existing accounts/passwords were unchanged. Random test credentials
+  remain in an ignored local private file, never in this document or source.
+  Normal authenticated sessions were delivered through the SDK's existing auth
+  callback handling; both real phone screens were observed at the campus map.
+- Both devices correctly reported GPS outside the campus boundary. Their real
+  off-campus positions were not published as map markers. Bluetooth discovery and
+  lifecycle acceptance are still pending; installation/sign-in alone are not a pass.
+
+These current iOS build observations supersede the earlier unavailable-Mac limit.
+Detailed current device evidence is kept in ignored `output/nearby/`.
+
 ## Platform references
 
 - [Plugin version and central/peripheral API matrix](https://pub.dev/packages/bluetooth_low_energy/versions/6.2.1)
