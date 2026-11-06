@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:geolocator/geolocator.dart' as gps;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../map/campus_geography.dart';
 import '../map/campus_style.dart';
@@ -21,6 +22,10 @@ import '../player/latest_projection.dart';
 import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
 import '../widgets/monstera_leaf.dart';
+import '../nearby/nearby_controller.dart';
+import '../nearby/nearby_repository.dart';
+import '../nearby/ble_nearby_radio.dart';
+import '../nearby/nearby_widgets.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -31,6 +36,12 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  NearbyController? _nearby;
+  final _nearbyCamera = ValueNotifier<int>(0);
+  NearbyController get _nearbyController => _nearby ??= NearbyController(
+    SupabaseNearbyRepository(Supabase.instance.client),
+    BleNearbyRadio(),
+  );
   // ==========================================
   // CAMERA CONFIGURATION
   // ==========================================
@@ -264,6 +275,8 @@ class _MapScreenState extends State<MapScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _nearby?.dispose();
+    _nearbyCamera.dispose();
 
     _expiry?.cancel();
 
@@ -362,6 +375,7 @@ class _MapScreenState extends State<MapScreen>
   // Visibility is independent of freshness: retain only the cosmetic last
   // accepted position. _lastPosition is cleared so it is not a current fix.
   void _holdTravel(String message) {
+    _nearby?.updatePosition(null);
     _updateProximity(_proximity.unavailable);
     _cowboyMotion.stop();
     _travel.pause();
@@ -878,6 +892,7 @@ class _MapScreenState extends State<MapScreen>
 
     // Hide Vaquero outside campus.
     if (!campus.contains(point)) {
+      _nearby?.updatePosition(null);
       _updateProximity(_proximity.unavailable);
       _cowboyMotion.stop();
       _clearTravel();
@@ -921,6 +936,10 @@ class _MapScreenState extends State<MapScreen>
       _holdTravel('Checking GPS position - showing last known position');
       return;
     }
+
+    _nearby?.updatePosition(
+      CampusFix(point, position.accuracy, position.timestamp),
+    );
 
     _updateProximity(
       () => _proximity.accept(
@@ -1103,6 +1122,7 @@ class _MapScreenState extends State<MapScreen>
       return const MapboxConfigurationNotice();
     }
 
+    final nearby = _ready ? _nearbyController : null;
     return ColoredBox(
       color: const Color(0xffc9ddd3),
 
@@ -1118,6 +1138,7 @@ class _MapScreenState extends State<MapScreen>
               viewport: _initialViewport,
 
               onCameraChangeListener: (_) {
+                _nearbyCamera.value++;
                 _syncKittyCats();
                 _syncMonsteraLeaf();
 
@@ -1199,6 +1220,21 @@ class _MapScreenState extends State<MapScreen>
             placement: _cowboyPlacement,
             active: _ready && _foreground,
           ),
+          if (_ready && nearby != null)
+            Positioned.fill(
+              child: NearbyMapLayer(
+                controller: nearby,
+                map: _map,
+                cameraChanges: _nearbyCamera,
+                active: _foreground && _error == null,
+              ),
+            ),
+          if (_ready)
+            Positioned(
+              left: 12,
+              top: 12,
+              child: NearbyButton(controller: nearby!),
+            ),
 
           // ==================================
           // GPS AND ZOOM BUTTONS

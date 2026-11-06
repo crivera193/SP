@@ -51,7 +51,7 @@ class AuthGate extends StatelessWidget {
             ),
           );
         }
-        return const MainScreen();
+        return MainScreen(key: ValueKey(user.id));
       },
     );
   }
