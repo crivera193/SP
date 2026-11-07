@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:geolocator/geolocator.dart' as gps;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
-import 'package:lottie/lottie.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../map/campus_geography.dart';
@@ -23,7 +22,7 @@ import '../player/latest_projection.dart';
 import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
 import '../widgets/monstera_leaf.dart';
-import '../widgets/map_lottie_spot.dart';
+import '../widgets/stallion_spot.dart';
 import '../nearby/nearby_controller.dart';
 import '../nearby/nearby_repository.dart';
 import '../nearby/ble_nearby_radio.dart';
@@ -1116,7 +1115,6 @@ class _MapScreenState extends State<MapScreen>
       final x = pixel.x.toDouble();
       final y = pixel.y.toDouble();
 
-
       // Reject non-finite coordinates.
       if (!x.isFinite || !y.isFinite) {
         debugPrint('VAQUERO: Invalid screen coordinates');
@@ -1239,17 +1237,7 @@ class _MapScreenState extends State<MapScreen>
 
                 return Stack(
                   clipBehavior: Clip.hardEdge,
-                  children: [
-                    MapLottieSpot(
-                      position: position,
-                      name: 'Monstera Point',
-                      description: 'An animated Monstera on campus.',
-                      width: 90,
-                      height: 110,
-                      anchorY: 110,
-                      child: const MonsteraLeaf(),
-                    ),
-                  ],
+                  children: [MonsteraSpot(position: position)],
                 );
               },
             ),
@@ -1263,21 +1251,7 @@ class _MapScreenState extends State<MapScreen>
                 if (position == null) return const SizedBox.shrink();
                 return Stack(
                   clipBehavior: Clip.hardEdge,
-                  children: [
-                    MapLottieSpot(
-                      position: Offset(position.dx + 10, position.dy),
-                      name: 'Stallion Point',
-                      description: 'You discovered the campus stallion!',
-                      width: 120,
-                      height: 120,
-                      anchorY: 75,
-                      child: Lottie.asset(
-                        'assets/animations/animals/stallion.json',
-                        fit: BoxFit.contain,
-                        repeat: true,
-                      ),
-                    ),
-                  ],
+                  children: [StallionSpot(position: position)],
                 );
               },
             ),
