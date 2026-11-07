@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:geolocator/geolocator.dart' as gps;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Size;
+import 'package:lottie/lottie.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../map/campus_geography.dart';
@@ -22,6 +23,7 @@ import '../player/latest_projection.dart';
 import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
 import '../widgets/monstera_leaf.dart';
+import '../widgets/map_lottie_spot.dart';
 import '../nearby/nearby_controller.dart';
 import '../nearby/nearby_repository.dart';
 import '../nearby/ble_nearby_radio.dart';
@@ -105,6 +107,13 @@ class _MapScreenState extends State<MapScreen>
   final _monsteraPlacement = ValueNotifier<Offset?>(null);
 
   late final LatestProjection<Offset> _monsteraProjector;
+  // Stallion Point: 26.3063611, -98.1753889.
+  static const CampusPoint _stallionLocation = CampusPoint(
+    -98.1753889,
+    26.3063611,
+  );
+  final _stallionPlacement = ValueNotifier<Offset?>(null);
+  late final LatestProjection<Offset> _stallionProjector;
 
   late final LatestProjection<List<Offset>> _kittyProjector;
 
@@ -117,6 +126,7 @@ class _MapScreenState extends State<MapScreen>
       point: KittyIsland.center,
     ),
     GameSpot(id: 'monstera', name: 'Monstera', point: _monsteraLocation),
+    GameSpot(id: 'stallion', name: 'Stallion Point', point: _stallionLocation),
   ]);
 
   void _updateProximity(void Function() update) {
@@ -250,6 +260,25 @@ class _MapScreenState extends State<MapScreen>
     // VAQUERO PROJECTION
     // ========================================
 
+    _stallionProjector = LatestProjection<Offset>(
+      read: () async {
+        final map = _map;
+        if (map == null ||
+            !_ready ||
+            !_styleLoaded ||
+            !_foreground ||
+            _error != null) {
+          return null;
+        }
+        final pixel = await map.pixelForCoordinate(_point(_stallionLocation));
+        if (!pixel.x.isFinite || !pixel.y.isFinite) return null;
+        return Offset(pixel.x, pixel.y);
+      },
+      apply: (position) {
+        if (mounted) _stallionPlacement.value = position;
+      },
+    );
+
     _projector = LatestProjection<CowboyPlacement>(
       read: _readCowboyProjection,
 
@@ -288,6 +317,8 @@ class _MapScreenState extends State<MapScreen>
     _kittyPlacement.dispose();
     _monsteraProjector.dispose();
     _monsteraPlacement.dispose();
+    _stallionProjector.dispose();
+    _stallionPlacement.dispose();
 
     _projector.dispose();
     _cowboyPlacement.dispose();
@@ -341,7 +372,17 @@ class _MapScreenState extends State<MapScreen>
     unawaited(_kittyProjector.request(invalidate: true));
   }
 
+  void _syncStallion() {
+    if (!_foreground || !_ready || _error != null) {
+      _stallionProjector.cancel();
+      _stallionPlacement.value = null;
+      return;
+    }
+    unawaited(_stallionProjector.request(invalidate: true));
+  }
+
   void _syncMonsteraLeaf() {
+    _syncStallion();
     if (!_foreground || !_ready || _error != null) {
       _monsteraProjector.cancel();
       _monsteraPlacement.value = null;
@@ -543,6 +584,8 @@ class _MapScreenState extends State<MapScreen>
     _kittyPlacement.value = null;
     _monsteraProjector.cancel();
     _monsteraPlacement.value = null;
+    _stallionProjector.cancel();
+    _stallionPlacement.value = null;
 
     _clearTravel();
     _cowboyMotion.stop();
@@ -1073,11 +1116,6 @@ class _MapScreenState extends State<MapScreen>
       final x = pixel.x.toDouble();
       final y = pixel.y.toDouble();
 
-      debugPrint(
-        'VAQUERO POSITION: '
-        'x=$x y=$y '
-        'screen=${size.width}x${size.height}',
-      );
 
       // Reject non-finite coordinates.
       if (!x.isFinite || !y.isFinite) {
@@ -1202,9 +1240,13 @@ class _MapScreenState extends State<MapScreen>
                 return Stack(
                   clipBehavior: Clip.hardEdge,
                   children: [
-                    Positioned(
-                      left: position.dx - 45,
-                      top: position.dy - 110,
+                    MapLottieSpot(
+                      position: position,
+                      name: 'Monstera Point',
+                      description: 'An animated Monstera on campus.',
+                      width: 90,
+                      height: 110,
+                      anchorY: 110,
                       child: const MonsteraLeaf(),
                     ),
                   ],
@@ -1213,6 +1255,34 @@ class _MapScreenState extends State<MapScreen>
             ),
           ),
           // ==================================
+          // STALLION LOTTIE GAME SPOT
+          Positioned.fill(
+            child: ValueListenableBuilder<Offset?>(
+              valueListenable: _stallionPlacement,
+              builder: (context, position, _) {
+                if (position == null) return const SizedBox.shrink();
+                return Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    MapLottieSpot(
+                      position: Offset(position.dx + 10, position.dy),
+                      name: 'Stallion Point',
+                      description: 'You discovered the campus stallion!',
+                      width: 120,
+                      height: 120,
+                      anchorY: 75,
+                      child: Lottie.asset(
+                        'assets/animations/animals/stallion.json',
+                        fit: BoxFit.contain,
+                        repeat: true,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+
           // ANIMATED VAQUERO
           // ==================================
           CowboySprite(
