@@ -11,6 +11,7 @@ dependencies:
   mapbox_maps_flutter: 2.26.0
   geolocator: ^14.1.2
   bluetooth_low_energy: 6.2.1
+  flame: 1.38.2
   lottie: 3.6.1
 dev_dependencies:
   flutter_test:
@@ -23,6 +24,7 @@ flutter:
     - assets/auth/field-notes-map.png
     - assets/campus/
     - assets/icon/
+    - assets/teams/
     - assets/player/cowboy/
     - assets/animations/kitty-island/
     - assets/animations/plants/

@@ -9,7 +9,7 @@ import 'package:lottie/lottie.dart';
 
 void main() {
   testWidgets(
-    'all actual Lottie files decode and animate without blocking input',
+    'Lottie cats animate, open their game spot and leave the surrounding map tappable',
     (tester) async {
       for (final color in ['dark', 'orange', 'gray']) {
         final bytes = File(
@@ -62,6 +62,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.byType(Lottie), findsNWidgets(3));
       await tester.tapAt(const Offset(216, 450));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(taps, 0);
+      expect(find.text('Feed the campus cats for a gift.'), findsOneWidget);
+      Navigator.of(tester.element(find.text('Kitty Island'))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tapAt(const Offset(216, 350));
       expect(taps, 1);
       final boundary =
           key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
