@@ -22,14 +22,12 @@ first and reconcile lost responses. Late responses after disposal are ignored.
 
 ## Backend deployment prerequisite
 
-The migration `supabase/migrations/20261108010000_sp_permanent_teams.sql` is
-**included as source and locally tested, not applied to live Supabase**.
-Before deploying this app revision, inspect SP project
-`bsvcnndqvjizxgnxhxkd` (SProject_2.0) for conflicting objects and apply this exact
-migration through its authorized deployment workflow. Do not replay it or use
-UTRGV-GOTest's backend. Without these RPCs the app intentionally shows the team
-check error after sign-in; it cannot enter the map until deployment is complete.
-Source push does not deploy this schema or update installed apps.
+The migration `supabase/migrations/20261108010000_sp_permanent_teams.sql` was
+applied on November 8, 2026 to SP project `bsvcnndqvjizxgnxhxkd` (SProject_2.0)
+through the authenticated crivera193 Chrome/Supabase dashboard. Readback verified
+the three catalog entries, authenticated-only RPC execution, unchanged seven
+existing accounts and unchanged signup-function hash. Do not replay it or use
+UTRGV-GOTest's backend. Source pushes alone do not deploy schemas or update apps.
 
 The migration adds only the isolated `sp_teams` schema and two namespaced public
 RPCs. It does not alter existing signup functions or import another project's
@@ -85,8 +83,45 @@ not native phone screenshots or owner acceptance.
 Android x86_64 debug integration uses the production `lib/main.dart` entrypoint
 and the existing ignored Mapbox configuration; the final build passed. APK SHA-256:
 `78c0d9b69fea449ae084b7ba5fe0d82865094e31adb82c998021d3c611bb0d7a`.
-Existing Bluetooth/Mapbox Kotlin future-toolchain warnings remain. No install, live account choice,
-backend mutation or physical-phone test is part of this source transfer. Current
-iOS compilation and live SP onboarding/restart/two-device tests remain separate
-deployment verification. Existing Bluetooth device evidence does not verify
-this new onboarding revision.
+Existing Bluetooth/Mapbox Kotlin future-toolchain warnings remain. The initial
+source-only checks above preceded the live deployment and phone checks below.
+
+## Observed Android/live Supabase behavior
+
+Release build 12051, source `ba518f9`, was installed in place as the separate
+`com.example.campus_app.spverify` package on Samsung SM-S948U1, 1440×3120 at
+600 dpi. Existing/new signing matched; pulled installed APK bytes matched SHA-256
+`9c85f3b00cb331d11c6a8c9b35a9ea33473d045f64fbfdfa86c84d3856ed7872`.
+Through the normal phone sign-in form, the dedicated Android test account entered
+selection. Cancel left membership unset; explicit confirmation saved Art and
+Stuff and opened the map. An independent actual Auth/REST client read the same
+saved team. Sign-out/sign-in skipped selection. A full force-stop left no PID;
+Android reported COLD on relaunch and the app-bar dialog still showed Art and
+Stuff. An actual request for Math and Engineering returned the original Art and
+Stuff membership. The other dedicated test account remained unassigned. The
+original `com.example.campus_app` stayed at build 12049 with its prior update time.
+Evidence is ignored under `output/team-phone/`; no real account was assigned.
+
+This phone exposed unnecessary horizontal overflow for three teams: 118 logical
+pixels per column exceeded its available width. The follow-up fixes up to three
+columns to the viewport and disables horizontal scrolling when they fit. Larger
+catalogs retain scrolling and its hint only when content exceeds the viewport.
+The narrow-phone regression exercises an actual horizontal drag at widths 320
+and 384; the fourth-team selection test remains in the suite.
+
+Follow-up release build 12052 was observed on that same physical Android phone:
+all three hats and labels fit, the swipe hint/scrollbar were absent, and a real
+horizontal drag did not move the columns. The Health and Science hat opened its
+correct confirmation dialog; cancel returned to the selector. A separate live
+Auth/REST read confirmed the existing second test account remained unassigned.
+The phone was left on this selector for inspection. No memberships were reset.
+Pulled installed APK bytes matched the new build SHA-256
+`8305319fc930e4ec4387f29861db300a464d917cfd1f0b8f03b6d8da739f78c3`;
+signing remained unchanged and the original app remained at 12049. Analysis
+and all 66 unit/widget tests passed, including selection of a fourth team.
+Native captures are `output/team-phone/swipe-fixed-final.png` and
+`swipe-fixed-health-dialog.png` (ignored verification evidence).
+
+Current iOS onboarding compilation/runtime, live two-device simultaneous team
+selection and network-interruption recovery remain unverified. Earlier Bluetooth
+device evidence does not establish those onboarding results.

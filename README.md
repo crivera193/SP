@@ -7,9 +7,9 @@ SProject_2.0 (`bsvcnndqvjizxgnxhxkd`). [Nearby players](docs/nearby-players.md)
 uses Bluetooth encounters while both users opt in and keep the app active; GPS
 only supplies their map positions. Physical Android/iPhone acceptance is pending.
 
-[Permanent team selection](docs/team-selection.md) requires the new SP-specific
-database migration **before deploying this app revision**. It is included and
-locally tested; it has not been applied to live Supabase.
+[Permanent team selection](docs/team-selection.md) uses the SP-specific migration
+applied to live Supabase on November 8, 2026. Do not replay it. The normal sign-in,
+selection, cancel/save and restored membership flows were checked on Android.
 
 ```sh
 flutter pub get

@@ -236,6 +236,24 @@ void main() {
     },
   );
 
+  testWidgets('three teams fit narrow phones without horizontal scrolling', (
+    tester,
+  ) async {
+    for (final size in [const Size(320, 640), const Size(384, 832)]) {
+      await open(tester, MemoryTeams(), size: size, account: size.toString());
+      expect(find.text('Swipe to see all teams.'), findsNothing);
+      final first = find.byKey(const ValueKey('team-health_science'));
+      final last = find.byKey(const ValueKey('team-art_stuff'));
+      final original = tester.getTopLeft(first);
+      expect(tester.getRect(first).left, greaterThanOrEqualTo(0));
+      expect(tester.getRect(last).right, lessThanOrEqualTo(size.width));
+      await tester.drag(first, const Offset(-160, 0));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.getTopLeft(first), original);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('real scene and confirmation review captures', (tester) async {
     await open(tester, MemoryTeams());
     if (const bool.fromEnvironment('CAPTURE_TEAM_REVIEW')) {

@@ -210,13 +210,20 @@ class _TeamSelectionScreenState extends State<TeamSelectionScreen>
                             const SizedBox(height: 16),
                             LayoutBuilder(
                               builder: (context, bounds) {
-                                final width = math.max(
-                                  bounds.maxWidth,
-                                  widget.membership.choices.length * 118.0,
-                                );
+                                // Keep the original three choices within the
+                                // viewport, including narrow/high-density phones.
+                                final width =
+                                    widget.membership.choices.length <= 3
+                                    ? bounds.maxWidth
+                                    : math.max(
+                                        bounds.maxWidth,
+                                        widget.membership.choices.length *
+                                            118.0,
+                                      );
+                                final scrolls = width > bounds.maxWidth;
                                 return Column(
                                   children: [
-                                    if (width > bounds.maxWidth)
+                                    if (scrolls)
                                       const Text(
                                         'Swipe to see all teams.',
                                         style: TextStyle(
@@ -226,10 +233,13 @@ class _TeamSelectionScreenState extends State<TeamSelectionScreen>
                                       ),
                                     Scrollbar(
                                       controller: _choicesScroll,
-                                      thumbVisibility: width > bounds.maxWidth,
+                                      thumbVisibility: scrolls,
                                       child: SingleChildScrollView(
                                         controller: _choicesScroll,
                                         scrollDirection: Axis.horizontal,
+                                        physics: scrolls
+                                            ? null
+                                            : const NeverScrollableScrollPhysics(),
                                         child: SizedBox(
                                           width: width,
                                           child: Column(
