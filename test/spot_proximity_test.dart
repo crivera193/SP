@@ -33,6 +33,36 @@ void main() {
     return p;
   }
 
+  test('each landmark reveals independently, even after dismissing a card', () {
+    final proximity = SpotProximity([a, b]);
+    fix(proximity, 0);
+    expect(proximity.revealedSpots(at(0)), isEmpty);
+    fix(proximity, 3);
+    expect(proximity.revealedSpots(at(3)), {'a', 'b'});
+    proximity.dismiss();
+    expect(proximity.revealedSpots(at(3)), {'a', 'b'});
+
+    // Crossing the outer boundary once does not revoke the reveal.
+    fix(proximity, 5, lon: 0.0005);
+    expect(proximity.revealedSpots(at(5)), {'a', 'b'});
+    fix(proximity, 8, lon: 0.0005);
+    expect(proximity.revealedSpots(at(8)), isEmpty);
+
+    fix(proximity, 9);
+    fix(proximity, 12);
+    expect(proximity.revealedSpots(at(12)), {'a', 'b'});
+    fix(proximity, 13, accuracy: 16);
+    expect(proximity.revealedSpots(at(13)), isEmpty);
+  });
+
+  test('stale GPS and off-campus fixes never reveal animations', () {
+    final proximity = arrived();
+    expect(proximity.revealedSpots(at(3)), {'a'});
+    expect(proximity.revealedSpots(at(14)), isEmpty);
+    fix(proximity, 15, campus: false);
+    expect(proximity.revealedSpots(at(15)), isEmpty);
+  });
+
   test('fresh consistent entry; geographic meters and exit hysteresis', () {
     final p = SpotProximity([a]);
     fix(p, 0);

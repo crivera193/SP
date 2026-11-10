@@ -23,6 +23,7 @@ import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
 import '../widgets/monstera_leaf.dart';
 import '../widgets/stallion_spot.dart';
+import '../widgets/diamond_spot.dart';
 import '../nearby/nearby_controller.dart';
 import '../nearby/nearby_repository.dart';
 import '../nearby/ble_nearby_radio.dart';
@@ -128,13 +129,22 @@ class _MapScreenState extends State<MapScreen>
     GameSpot(id: 'stallion', name: 'Stallion Point', point: _stallionLocation),
   ]);
 
+  Set<String> _revealedSpots = const <String>{};
+
   void _updateProximity(void Function() update) {
     final previousState = _proximity.state;
     final previousSpot = _proximity.selected?.id;
+    final previousReveals = _revealedSpots;
     update();
+    final nextReveals = _proximity.revealedSpots(DateTime.now());
+    _revealedSpots = nextReveals;
+    final revealsChanged =
+        previousReveals.length != nextReveals.length ||
+        !previousReveals.containsAll(nextReveals);
     if (mounted &&
         (previousState != _proximity.state ||
-            previousSpot != _proximity.selected?.id)) {
+            previousSpot != _proximity.selected?.id ||
+            revealsChanged)) {
       setState(() {});
     }
   }
@@ -217,6 +227,16 @@ class _MapScreenState extends State<MapScreen>
 
           positions.add(Offset(pixel.x, pixel.y));
         }
+
+        // Fourth projection is the single Kitty Island landmark center.
+        // The three cats keep their existing individual coordinates.
+        final centerPixel = await map.pixelForCoordinate(
+          _point(KittyIsland.center),
+        );
+        if (!centerPixel.x.isFinite || !centerPixel.y.isFinite) {
+          return null;
+        }
+        positions.add(Offset(centerPixel.x, centerPixel.y));
 
         return positions;
       },
@@ -1219,7 +1239,27 @@ class _MapScreenState extends State<MapScreen>
                   return const SizedBox.shrink();
                 }
 
-                return KittyIslandCats(positions: positions);
+                if (positions.length != KittyIsland.cats.length + 1) {
+                  return const SizedBox.shrink();
+                }
+                return Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    if (_revealedSpots.contains('kitty-island'))
+                      KittyIslandCats(
+                        positions: positions
+                            .take(KittyIsland.cats.length)
+                            .toList(),
+                      )
+                    else
+                      DiamondSpot(
+                        position: positions.last,
+                        width: 90,
+                        height: 90,
+                        anchorY: 75,
+                      ),
+                  ],
+                );
               },
             ),
           ),
@@ -1237,7 +1277,17 @@ class _MapScreenState extends State<MapScreen>
 
                 return Stack(
                   clipBehavior: Clip.hardEdge,
-                  children: [MonsteraSpot(position: position)],
+                  children: [
+                    if (_revealedSpots.contains('monstera'))
+                      MonsteraSpot(position: position)
+                    else
+                      DiamondSpot(
+                        position: position,
+                        width: 90,
+                        height: 110,
+                        anchorY: 110,
+                      ),
+                  ],
                 );
               },
             ),
@@ -1251,7 +1301,17 @@ class _MapScreenState extends State<MapScreen>
                 if (position == null) return const SizedBox.shrink();
                 return Stack(
                   clipBehavior: Clip.hardEdge,
-                  children: [StallionSpot(position: position)],
+                  children: [
+                    if (_revealedSpots.contains('stallion'))
+                      StallionSpot(position: position)
+                    else
+                      DiamondSpot(
+                        position: Offset(position.dx + 10, position.dy),
+                        width: 120,
+                        height: 120,
+                        anchorY: 75,
+                      ),
+                  ],
                 );
               },
             ),

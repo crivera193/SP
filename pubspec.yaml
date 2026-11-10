@@ -29,6 +29,7 @@ flutter:
     - assets/animations/kitty-island/
     - assets/animations/plants/
     - assets/animations/animals/
+    - assets/animations/markers/
 
   fonts:
     - family: Inter

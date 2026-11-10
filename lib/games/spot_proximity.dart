@@ -141,6 +141,16 @@ class SpotProximity {
     _evaluate(now);
   }
 
+  /// Confirmed, on-campus landmarks that may show their real animations.
+  /// Independent of the single arrival card and the dismissed state.
+  Set<String> revealedSpots(DateTime now) {
+    if (!_usable(now) || !_onCampus) return const <String>{};
+    return {
+      for (final spot in spots)
+        if (spot.enabled && _inside.contains(spot.id)) spot.id,
+    };
+  }
+
   void unavailable() {
     _fix = null;
     _onCampus = false;
