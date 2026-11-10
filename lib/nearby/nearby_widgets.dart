@@ -55,7 +55,7 @@ class NearbyPanel extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Bluetooth finds players while you both use the app. GPS only places discovered players on the map. Turning this on shares your current position with those players.',
+                'Turn Bluetooth on to wrangle some friends nearby.',
               ),
               const SizedBox(height: 12),
               Text(controller.status, key: const ValueKey('nearby-status')),
