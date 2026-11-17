@@ -46,12 +46,6 @@ class _QuizScreenState extends State<QuizScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (point != null) ...[
-                Text(point.description),
-                const SizedBox(height: 16),
-                QuizScoreboard(location: point),
-                const SizedBox(height: 24),
-              ],
               if (s.busy) const LinearProgressIndicator(),
               if (point == null)
                 const Text('This location has been disabled or removed.'),
@@ -108,6 +102,14 @@ class _QuizScreenState extends State<QuizScreen> {
                   ),
                 ),
               ],
+              if (point != null) ...[
+                const SizedBox(height: 24),
+                QuizScoreboard(location: point),
+                if (point.description.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(point.description),
+                ],
+              ],
               const SizedBox(height: 24),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -125,38 +127,66 @@ class QuizScoreboard extends StatelessWidget {
   const QuizScoreboard({super.key, required this.location});
   final QuizLocation location;
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            location.owner == null
-                ? 'Unclaimed location'
-                : 'Leader: ${location.owner!.displayName}',
-            key: const ValueKey('quiz-owner'),
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          for (final score in location.scores)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  Icon(Icons.flag, color: score.team.color),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(score.team.displayName)),
-                  Text('${score.correct} correct'),
-                ],
-              ),
+  Widget build(BuildContext context) {
+    final highest = location.scores.fold<int>(
+      0,
+      (value, score) => score.correct > value ? score.correct : value,
+    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              location.owner == null
+                  ? 'Unclaimed location'
+                  : 'Leader: ${location.owner!.displayName}',
+              key: const ValueKey('quiz-owner'),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-          const SizedBox(height: 8),
-          const Text('Ties go to the team that reached the score first.'),
-        ],
+            const SizedBox(height: 12),
+            for (final score in location.scores)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Semantics(
+                  label: '${score.team.displayName}, ${score.correct} correct',
+                  child: ExcludeSemantics(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(child: Text(score.team.displayName)),
+                            const SizedBox(width: 12),
+                            Text('${score.correct} correct'),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            key: ValueKey('quiz-score-${score.team.id}'),
+                            value: highest == 0 ? 0 : score.correct / highest,
+                            minHeight: 12,
+                            color: score.team.color,
+                            backgroundColor: score.team.color.withValues(
+                              alpha: .18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            const Text('Ties go to the team that reached the score first.'),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class QuizCatalogNotice extends StatelessWidget {

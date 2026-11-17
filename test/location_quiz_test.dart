@@ -51,7 +51,7 @@ Map<String, dynamic> location({
 QuizAttempt attempt({bool answered = false, int revision = 0}) =>
     QuizAttempt.fromJson({
       'id': 'attempt',
-      'prompt': 'Placeholder: 2 + 2 = 4.',
+      'prompt': 'Question:True or False',
       'status': answered ? 'answered' : 'active',
       'correct': answered ? true : null,
       'selected': answered ? true : null,
@@ -230,7 +230,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('A. True'), findsOneWidget);
       expect(find.text('B. False'), findsOneWidget);
-      await capture(tester, key, 'question-390x844');
+      await capture(tester, key, 'question-first-390x844');
       await tester.tap(find.byKey(const ValueKey('quiz-true')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
@@ -239,7 +239,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('Next quiz in'), findsOneWidget);
-      await capture(tester, key, 'saved-390x844');
+      await capture(tester, key, 'score-bars-saved-390x844');
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox.shrink());
       session.dispose();

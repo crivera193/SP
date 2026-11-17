@@ -9,8 +9,8 @@ crivera193 on November 17.
 
 ## Behavior
 
-Locations open **A. True / B. False** quizzes. The initial database-authored
-question is “Placeholder: 2 + 2 = 4.” Correct answers add one to that location's
+Locations open **A. True / B. False** quizzes. The current database-authored
+placeholder is “Question:True or False”. Correct answers add one to that location's
 team total; incorrect answers add nothing. Both owning and opposing teams may
 play. Repeat play uses each location's editable cooldown, initially **600 seconds**
 after an answer. Ties favor the team that reached that score first. Server locks,
@@ -163,3 +163,29 @@ Current evidence is in ignored `output/quizzes/physical-testing-20261117.json`,
 `phone-12064-quiz-repeat.png`, `phone-12064-nonfriend-blocked.png` and
 `gps-freshness-12s.jpg`. Earlier 12063/10 readbacks are retained as historical
 evidence, including the failed timing-only attempt.
+
+## Subsequent UI revision
+
+The question and True/False answers now precede a horizontal team-color bar chart.
+Bars scale to the highest score; zero scores retain empty colored tracks. The
+location description follows the scores. The map GPS status banner and automatic
+arrival card are removed; point taps and location eligibility checks remain.
+The Bluetooth introductory blurb and the Friends paragraph above the friend code
+are removed, as clarified by the owner. The Friends display/copy widget check passed.
+
+Analysis and all 96 Flutter tests passed for publication. Android emulator
+build 12065 was installed in place and inspected at 1080×2400 with live SP quiz
+data: question first, all three team bars and no arrival popup. The later Bluetooth
+wording correction passed the panel's enable/disable widget check. No answers
+were submitted during this UI preview. Native
+captures are `output/quizzes/quiz-layout-native-12065.png`,
+`map-no-gps-popups-12065.png`. The older `bluetooth-wording-12065.png` capture
+predates removal of the blurb.
+The physical phone apps were not updated in this pass. The owner authorized
+committing and pushing all remaining updates to SP main on November 17.
+
+The owner subsequently requested the placeholder text replacement above. It was
+applied live to `sp_quiz.questions` on November 17 (question version 2). Unanswered
+attempts containing the previous wording were retired so reopening loads the new
+text; answered history, cooldowns, scores and ownership were preserved. The quiz
+display widget check passed with the updated prompt.

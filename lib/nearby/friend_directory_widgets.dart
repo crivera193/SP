@@ -55,9 +55,6 @@ class _FriendDirectoryPanelState extends State<FriendDirectoryPanel> {
               children: [
                 Text('Friends', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 12),
-                const Text(
-                  'Verify your friend list here while online. Nearby players and friend Bluetooth sessions work without internet using that verified list.',
-                ),
                 if (book.selfCode != null)
                   ListTile(
                     contentPadding: EdgeInsets.zero,

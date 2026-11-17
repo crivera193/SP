@@ -120,7 +120,6 @@ class _MapScreenState extends State<MapScreen>
 
   String? _styleUri;
   String? _error;
-  String? _locationMessage;
 
   bool _styleLoaded = false;
   bool _preparing = false;
@@ -411,7 +410,7 @@ class _MapScreenState extends State<MapScreen>
 
   // Visibility is independent of freshness: retain only the cosmetic last
   // accepted position. _lastPosition is cleared so it is not a current fix.
-  void _holdTravel(String message) {
+  void _holdTravel() {
     _nearby?.updatePosition(null);
     _updateProximity(_proximity.unavailable);
     _cowboyMotion.stop();
@@ -422,7 +421,6 @@ class _MapScreenState extends State<MapScreen>
     _projector.cancel();
     setState(() {
       _lastPosition = null;
-      _locationMessage = message;
     });
     unawaited(_projectCowboy());
   }
@@ -438,7 +436,7 @@ class _MapScreenState extends State<MapScreen>
 
     if (position != null &&
         now.difference(position.timestamp).inMilliseconds > 6000) {
-      _holdTravel('Waiting for GPS - showing last known position');
+      _holdTravel();
 
       return;
     }
@@ -789,7 +787,6 @@ class _MapScreenState extends State<MapScreen>
       if (!current() || _gpsSubscription != null) return;
       setState(() {
         _locating = true;
-        _locationMessage = 'Finding your location...';
       });
       try {
         final enabled = await gps.Geolocator.isLocationServiceEnabled();
@@ -829,23 +826,17 @@ class _MapScreenState extends State<MapScreen>
               },
               onError: (Object error) {
                 if (!current()) return;
-                _holdTravel('GPS unavailable - showing last known position');
+                _holdTravel();
                 unawaited(_stopGps());
               },
               onDone: () {
                 if (!current()) return;
                 _gpsSubscription = null;
-                _holdTravel('GPS unavailable - showing last known position');
+                _holdTravel();
               },
             );
-      } catch (error) {
-        if (current()) {
-          setState(() {
-            _locationMessage = error is StateError
-                ? error.message
-                : 'Could not start GPS.';
-          });
-        }
+      } catch (_) {
+        if (current()) _holdTravel();
       } finally {
         if (mounted) setState(() => _locating = false);
       }
@@ -912,7 +903,7 @@ class _MapScreenState extends State<MapScreen>
         !position.longitude.isFinite ||
         position.latitude.abs() > 90 ||
         position.longitude.abs() > 180) {
-      _holdTravel('Waiting for accurate GPS - showing last known position');
+      _holdTravel();
 
       return;
     }
@@ -934,8 +925,6 @@ class _MapScreenState extends State<MapScreen>
       setState(() {
         _lastPosition = null;
         _following = false;
-
-        _locationMessage = 'GPS position is outside the campus boundary.';
       });
 
       return;
@@ -957,17 +946,11 @@ class _MapScreenState extends State<MapScreen>
 
     _lastPosition = position;
 
-    if (_locationMessage != null) {
-      setState(() {
-        _locationMessage = null;
-      });
-    }
-
     // Feed smooth travel interpolation.
     _travel.accept(point, position.timestamp, accuracy: position.accuracy);
 
     if (_travel.awaitingReacquisition) {
-      _holdTravel('Checking GPS position - showing last known position');
+      _holdTravel();
       return;
     }
 
@@ -1255,50 +1238,6 @@ class _MapScreenState extends State<MapScreen>
           // ==================================
           // GPS AND ZOOM BUTTONS
           // ==================================
-          if (_ready && _foreground && _proximity.state == SpotState.eligible)
-            Positioned(
-              left: 12,
-              right: 76,
-              bottom: 100,
-              child: SafeArea(
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _proximity.selected!.name,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const Text(
-                          'You have arrived. Stop walking to answer a quiz.',
-                        ),
-                        FilledButton(
-                          onPressed: () {
-                            final point = _quizzes.find(
-                              _proximity.selected!.id,
-                            );
-                            if (point != null) unawaited(_openQuiz(point));
-                          },
-                          child: const Text('Open quiz'),
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: () =>
-                                _updateProximity(_proximity.dismiss),
-                            child: const Text('Dismiss'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
           if (_ready)
             Positioned(
               right: 12,
@@ -1323,6 +1262,9 @@ class _MapScreenState extends State<MapScreen>
                               if (_following) {
                                 _stopFollowing();
                               } else {
+                                if (_gpsSubscription == null) {
+                                  unawaited(_retryGps());
+                                }
                                 _beginGpsFollow();
                               }
                             },
@@ -1362,42 +1304,6 @@ class _MapScreenState extends State<MapScreen>
                       child: const Icon(Icons.remove),
                     ),
                   ],
-                ),
-              ),
-            ),
-
-          // ==================================
-          // GPS STATUS MESSAGE
-          // ==================================
-          if (_locationMessage != null && _ready)
-            Positioned(
-              left: 12,
-              right: 76,
-              bottom: 20,
-
-              child: Material(
-                color: const Color(0xfff5f1e3),
-
-                borderRadius: BorderRadius.circular(8),
-
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _locationMessage!,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      if (!_locating && _gpsSubscription == null)
-                        TextButton(
-                          onPressed: _retryGps,
-                          child: const Text('Retry GPS'),
-                        ),
-                    ],
-                  ),
                 ),
               ),
             ),

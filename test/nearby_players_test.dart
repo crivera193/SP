@@ -293,25 +293,29 @@ void main() {
       throwsFormatException,
     );
   });
-  testWidgets('discovery panel explains sharing, enables and disables it', (
-    tester,
-  ) async {
-    controller.dispose();
-    controller = NearbyController(repository, radio, observeLifecycle: false);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: NearbyPanel(controller: controller)),
-      ),
-    );
-    expect(find.textContaining('Bluetooth finds players'), findsOneWidget);
-    await tester.tap(find.text('Turn on'));
-    await tester.pumpAndSettle();
-    expect(controller.running, isTrue);
-    expect(find.text('Bluetooth on · no players detected'), findsOneWidget);
-    await tester.tap(find.text('Turn off'));
-    await tester.pump();
-    expect(controller.enabled, isFalse);
-    expect(controller.peers, isEmpty);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+  testWidgets(
+    'discovery panel enables and disables Bluetooth without a blurb',
+    (tester) async {
+      controller.dispose();
+      controller = NearbyController(repository, radio, observeLifecycle: false);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: NearbyPanel(controller: controller)),
+        ),
+      );
+      expect(
+        find.text('Wrangle up some friends. Turn Bluetooth on'),
+        findsNothing,
+      );
+      await tester.tap(find.text('Turn on'));
+      await tester.pumpAndSettle();
+      expect(controller.running, isTrue);
+      expect(find.text('Bluetooth on · no players detected'), findsOneWidget);
+      await tester.tap(find.text('Turn off'));
+      await tester.pump();
+      expect(controller.enabled, isFalse);
+      expect(controller.peers, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 }

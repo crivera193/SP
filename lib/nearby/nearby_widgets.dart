@@ -62,10 +62,6 @@ class NearbyPanel extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 12),
-              const Text(
-                'Bluetooth finds players nearby. Only verified friends in an open, verified Bluetooth session can share GPS positions on the map. This works without internet. Keep SP open.',
-              ),
-              const SizedBox(height: 12),
               Text(controller.status, key: const ValueKey('nearby-status')),
               if (controller.friends case final FriendController friends)
                 ..._friendControls(context, friends),
