@@ -7,6 +7,21 @@ committing and pushing this checked work to SP main using crivera193.
 
 ## Current behavior — November 16, 2026
 
+November 17 UI override: **Friends** is temporarily disabled and its panel is
+empty. Nearby players Bluetooth discovery remains available. Player labels are
+hidden from detected rows, session cards and map pins, and the explanatory
+position paragraph is removed. Existing stored friends, session verification
+and friend-only GPS authorization remain in place. Earlier friend-management
+screens described below are historical while this UI pause is active.
+
+This UI revision passed analysis and 25 focused tests. Emulator build 12069
+preserved the existing installation: Friends reported disabled/nonclickable,
+its tap left the map open, and Nearby players opened with Bluetooth enabled.
+Populated-list/session renders confirmed labels are absent. These renders use
+test data; this pass did not repeat physical two-phone Bluetooth verification.
+Native captures are `output/quizzes/friends-disabled-native-12069.png` and
+`nearby-active-native-12069.png`.
+
 Nearby discovery and opening/maintaining a verified friend's Bluetooth session
 work without internet. Other app features retain their normal internet behavior.
 **Chat is outside scope.** The final source has no chat box, Send button, text

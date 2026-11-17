@@ -65,13 +65,6 @@ class NearbyPanel extends StatelessWidget {
               Text(controller.status, key: const ValueKey('nearby-status')),
               if (controller.friends case final FriendController friends)
                 ..._friendControls(context, friends),
-              if (controller.peers.any((p) => p.position == null))
-                const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Players without a fresh Bluetooth position are not shown on the map.',
-                  ),
-                ),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -146,7 +139,6 @@ class NearbyPanel extends StatelessWidget {
                   ? Icons.verified_user
                   : Icons.person_outline,
             ),
-            title: Text(peer.label),
             subtitle: Text(switch (peer.friendship) {
               Friendship.none => 'Detected · communication locked',
               Friendship.incoming => 'Wants to be your friend',
@@ -210,12 +202,7 @@ class _FriendConversationCard extends StatelessWidget {
             children: [
               const Icon(Icons.lock_outline),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  conversation.grant.label,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
+              const Spacer(),
               IconButton(
                 tooltip: 'Close Bluetooth session',
                 onPressed: () =>
@@ -333,10 +320,10 @@ class _NearbyMapLayerState extends State<NearbyMapLayer> {
                       pixel.dx <= bounds.maxWidth &&
                       pixel.dy <= bounds.maxHeight)
                     Positioned(
-                      left: pixel.dx - 60,
-                      top: pixel.dy - 53,
-                      width: 120,
-                      child: NearbyPlayerMarker(label: peer.label),
+                      left: pixel.dx - 17,
+                      top: pixel.dy - 34,
+                      width: 34,
+                      child: const NearbyPlayerMarker(),
                     ),
         ],
       ),
@@ -345,29 +332,14 @@ class _NearbyMapLayerState extends State<NearbyMapLayer> {
 }
 
 class NearbyPlayerMarker extends StatelessWidget {
-  const NearbyPlayerMarker({super.key, required this.label});
-  final String label;
+  const NearbyPlayerMarker({super.key});
   @override
   Widget build(BuildContext context) => Semantics(
-    label: '$label, nearby over Bluetooth',
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: Color(0xff061e4a)),
-          ),
-        ),
-        const Icon(Icons.person_pin_circle, size: 34, color: Color(0xff235aa6)),
-      ],
+    label: 'Nearby player over Bluetooth',
+    child: const Icon(
+      Icons.person_pin_circle,
+      size: 34,
+      color: Color(0xff235aa6),
     ),
   );
 }

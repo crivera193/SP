@@ -368,6 +368,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Detected · communication locked'), findsOneWidget);
       expect(find.byTooltip('Open Bluetooth session'), findsOneWidget);
+      expect(find.text('Player nearby'), findsNothing);
+      expect(find.text('Player B'), findsNothing);
       Future<void> capture(String name) async {
         await tester.runAsync(() async {
           final image =
@@ -393,6 +395,7 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(find.text('Verified Bluetooth session'), findsOneWidget);
+      expect(find.text('Player B'), findsNothing);
       expect(find.byType(TextField), findsNothing);
       expect(find.text('Send'), findsNothing);
       expect(tester.takeException(), isNull);
@@ -412,6 +415,11 @@ void main() {
       expect(controller.friends!.conversations, isEmpty);
       expect(find.byTooltip('Open Bluetooth session'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: NearbyPlayerMarker())),
+      );
+      expect(find.byType(Text), findsNothing);
+      expect(find.byIcon(Icons.person_pin_circle), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
