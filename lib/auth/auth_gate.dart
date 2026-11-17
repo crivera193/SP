@@ -4,6 +4,7 @@ import '../screens/main_screen.dart';
 import 'login_screen.dart';
 import '../teams/team_gate.dart';
 import '../teams/team_membership.dart';
+import '../nearby/offline_nearby_entry.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -14,15 +15,27 @@ class AuthGate extends StatelessWidget {
       stream: client.auth.onAuthStateChange,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
+          final cachedUser = client.auth.currentUser;
           return Scaffold(
             body: Center(
-              child: TextButton(
-                onPressed: () async {
-                  await client.auth.signOut();
-                },
-                child: const Text(
-                  'Session unavailable. Sign out and try again.',
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (cachedUser != null &&
+                      StudentEmail.isEligible(cachedUser.email ?? ''))
+                    OfflineNearbyEntry(
+                      key: ValueKey('bluetooth-${cachedUser.id}'),
+                      account: cachedUser.id,
+                    ),
+                  TextButton(
+                    onPressed: () async {
+                      await client.auth.signOut();
+                    },
+                    child: const Text(
+                      'Session unavailable. Sign out and try again.',
+                    ),
+                  ),
+                ],
               ),
             ),
           );
@@ -60,6 +73,10 @@ class AuthGate extends StatelessWidget {
           key: ValueKey(user.id),
           repository: SupabaseTeamRepository(client, user.id),
           onSignOut: client.auth.signOut,
+          offlineNearby: OfflineNearbyEntry(
+            key: ValueKey('bluetooth-${user.id}'),
+            account: user.id,
+          ),
           child: const MainScreen(),
         );
       },

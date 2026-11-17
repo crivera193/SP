@@ -12,10 +12,12 @@ class TeamGate extends StatefulWidget {
     required this.repository,
     required this.onSignOut,
     required this.child,
+    this.offlineNearby,
   });
   final TeamRepository repository;
   final Future<void> Function() onSignOut;
   final Widget child;
+  final Widget? offlineNearby;
   @override
   State<TeamGate> createState() => _TeamGateState();
 }
@@ -91,6 +93,8 @@ class _TeamGateState extends State<TeamGate> {
                                 onPressed: membership.load,
                                 child: const Text('Retry team check'),
                               ),
+                              if (widget.offlineNearby != null)
+                                widget.offlineNearby!,
                             ],
                             TextButton(
                               onPressed: () async {

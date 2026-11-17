@@ -25,9 +25,13 @@ import '../widgets/monstera_leaf.dart';
 import '../widgets/stallion_spot.dart';
 import '../widgets/diamond_spot.dart';
 import '../nearby/nearby_controller.dart';
-import '../nearby/nearby_repository.dart';
 import '../nearby/ble_nearby_radio.dart';
 import '../nearby/nearby_widgets.dart';
+import '../nearby/verified_friend_book.dart';
+import '../nearby/online_friend_directory.dart';
+import '../nearby/offline_nearby_repository.dart';
+import '../nearby/offline_friend_repository.dart';
+import '../nearby/friend_directory_widgets.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -39,11 +43,50 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   NearbyController? _nearby;
+  VerifiedFriendBook? _friendBook;
+  OnlineFriendDirectory? _friendDirectory;
   final _nearbyCamera = ValueNotifier<int>(0);
-  NearbyController get _nearbyController => _nearby ??= NearbyController(
-    SupabaseNearbyRepository(Supabase.instance.client),
-    BleNearbyRadio(),
-  );
+  NearbyController get _nearbyController {
+    if (_nearby == null) _initFriends();
+    return _nearby!;
+  }
+
+  void _initFriends() {
+    if (_nearby != null) return;
+    final client = Supabase.instance.client;
+    final book = VerifiedFriendBook(client.auth.currentUser!.id);
+    _friendBook = book;
+    _friendDirectory = OnlineFriendDirectory(client, book);
+    final local = OfflineNearbyRepository(book);
+    final radio = BleNearbyRadio(
+      identity: () => book.selfCode,
+      onIdentity: local.identify,
+    );
+    _nearby = NearbyController(
+      local,
+      radio,
+      friendRepository: OfflineFriendRepository(local),
+      friendWire: radio.friendWire,
+      localPosition: local.encodePosition,
+      onPosition: (peer, fix) {
+        local.receivePosition(peer, fix);
+        unawaited(_nearby?.refresh());
+      },
+    );
+    book.addListener(_friendsChanged);
+    // Ordinary account bootstrap. No Bluetooth method can invoke this sync.
+    unawaited(
+      book.load().then((_) async {
+        if (mounted) await _friendDirectory!.refresh();
+      }),
+    );
+  }
+
+  void _friendsChanged() {
+    if (!mounted) return;
+    unawaited(_nearby?.friends?.refresh());
+    setState(() {});
+  }
   // ==========================================
   // CAMERA CONFIGURATION
   // ==========================================
@@ -313,6 +356,7 @@ class _MapScreenState extends State<MapScreen>
     _expiry = Timer.periodic(const Duration(seconds: 1), (_) => _expireGps());
 
     if (hasMapboxConfiguration) {
+      _initFriends();
       unawaited(_load());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _foreground) unawaited(_startGps(allowPrompt: true));
@@ -324,6 +368,9 @@ class _MapScreenState extends State<MapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _nearby?.dispose();
+    _friendBook?.removeListener(_friendsChanged);
+    _friendDirectory?.dispose();
+    _friendBook?.dispose();
     _nearbyCamera.dispose();
 
     _expiry?.cancel();
@@ -1337,7 +1384,15 @@ class _MapScreenState extends State<MapScreen>
             Positioned(
               left: 12,
               top: 12,
-              child: NearbyButton(controller: nearby!),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  NearbyButton(controller: nearby!),
+                  const SizedBox(height: 8),
+                  if (_friendDirectory != null)
+                    FriendDirectoryButton(directory: _friendDirectory!),
+                ],
+              ),
             ),
 
           // ==================================

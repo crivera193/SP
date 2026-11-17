@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import '../map/campus_fix.dart';
 import 'nearby_models.dart';
+import 'friend_controller.dart';
+import 'friend_protocol.dart';
 
 /// Owns one account's discovery session. GPS can update position data, never peers.
 class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
@@ -9,7 +11,19 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
     this.repository,
     this.radio, {
     this.observeLifecycle = true,
-  }) {
+    FriendRepository? friendRepository,
+    FriendWire? friendWire,
+    Map<String, dynamic>? Function()? localPosition,
+    void Function(String, Map<String, dynamic>?)? onPosition,
+  }) : friends = friendRepository != null && friendWire != null
+           ? FriendController(
+               friendRepository,
+               friendWire,
+               localPosition: localPosition,
+               onPosition: onPosition,
+             )
+           : null {
+    friends?.addListener(_notify);
     if (observeLifecycle) {
       WidgetsBinding.instance.addObserver(this);
       final state = WidgetsBinding.instance.lifecycleState;
@@ -19,6 +33,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
   final NearbyRepository repository;
   final NearbyRadio radio;
   final bool observeLifecycle;
+  final FriendController? friends;
   bool enabled = false, busy = false, running = false;
   bool _active = true, _disposed = false;
   int? _pollingEpoch;
@@ -102,7 +117,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
           await _fail(
             e is StateError
                 ? e.message.toString()
-                : 'Nearby players could not connect. Check internet and retry.',
+                : 'Nearby players could not connect. Check Bluetooth and retry.',
           );
         }
       }
@@ -117,45 +132,54 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
         : null;
   }
 
-  Future<void> _startRadio(int epoch) => radio.start(
-    _session!.token,
-    _config!,
-    (peer) async {
-      final session = _session;
-      if (!_current(epoch) || session == null) return null;
-      try {
-        final nonce = await repository.challenge(session.token, peer);
-        return _current(epoch) ? nonce : null;
-      } catch (_) {
-        if (_current(epoch)) {
-          unawaited(_fail('Nearby connection lost. Check internet and retry.'));
+  Future<void> _startRadio(int epoch) async {
+    await friends?.suspend();
+    if (!_current(epoch)) return;
+    await radio.start(
+      _session!.token,
+      _config!,
+      (peer) async {
+        final session = _session;
+        if (!_current(epoch) || session == null) return null;
+        try {
+          final nonce = await repository.challenge(session.token, peer);
+          return _current(epoch) ? nonce : null;
+        } catch (_) {
+          if (_current(epoch)) {
+            unawaited(
+              _fail('Nearby connection lost. Check Bluetooth and retry.'),
+            );
+          }
+          return null;
         }
-        return null;
-      }
-    },
-    (nonce) async {
-      final session = _session, config = _config;
-      if (!_current(epoch) || session == null || config == null) return;
-      final now = DateTime.now();
-      _receipts.removeWhere((_, at) => now.difference(at) > config.challenge);
-      if (_receipts.containsKey(nonce) ||
-          _receipts.length >= config.maxPeers * 2) {
-        return;
-      }
-      _receipts[nonce] = now;
-      try {
-        final accepted = await repository.confirm(session.token, nonce);
-        if (_current(epoch) && accepted && running) unawaited(refresh());
-      } catch (_) {
-        if (_current(epoch)) {
-          unawaited(_fail('Nearby connection lost. Check internet and retry.'));
+      },
+      (nonce) async {
+        final session = _session, config = _config;
+        if (!_current(epoch) || session == null || config == null) return;
+        final now = DateTime.now();
+        _receipts.removeWhere((_, at) => now.difference(at) > config.challenge);
+        if (_receipts.containsKey(nonce) ||
+            _receipts.length >= config.maxPeers * 2) {
+          return;
         }
-      }
-    },
-    (message) {
-      if (_current(epoch)) unawaited(_fail(message));
-    },
-  );
+        _receipts[nonce] = now;
+        try {
+          final accepted = await repository.confirm(session.token, nonce);
+          if (_current(epoch) && accepted && running) unawaited(refresh());
+        } catch (_) {
+          if (_current(epoch)) {
+            unawaited(
+              _fail('Nearby connection lost. Check Bluetooth and retry.'),
+            );
+          }
+        }
+      },
+      (message) {
+        if (_current(epoch)) unawaited(_fail(message));
+      },
+    );
+    if (_current(epoch)) friends?.begin(_session!.token);
+  }
 
   Future<void> refresh() async {
     if (_pollingEpoch == _epoch || !running) return;
@@ -178,10 +202,12 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
       }
       if (!_current(epoch)) return;
       expire();
+      await friends?.refresh();
+      if (!_current(epoch)) return;
       _notify();
     } catch (_) {
       if (_current(epoch)) {
-        await _fail('Nearby connection lost. Check internet and retry.');
+        await _fail('Nearby connection lost. Check Bluetooth and retry.');
       }
     } finally {
       if (_pollingEpoch == epoch) _pollingEpoch = null;
@@ -213,6 +239,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
       _peers = kept;
       _notify();
     }
+    friends?.expire(nearby: _peers.map((p) => p.id).toSet());
   }
 
   Future<void> _fail(String message) async {
@@ -240,7 +267,13 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
               .catchError(
                 (Object _) {},
               ); // A missed close is bounded by the server lease.
-    _cleanup = Future.wait([_cleanup, native, server]).then((_) {});
+    final friendCleanup = friends?.suspend() ?? Future<void>.value();
+    _cleanup = Future.wait([
+      _cleanup,
+      native,
+      server,
+      friendCleanup,
+    ]).then((_) {});
     await _cleanup;
   }
 
@@ -264,6 +297,8 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
     if (observeLifecycle) WidgetsBinding.instance.removeObserver(this);
     _disposed = true;
     unawaited(_stop());
+    friends?.removeListener(_notify);
+    friends?.dispose();
     super.dispose();
   }
 }

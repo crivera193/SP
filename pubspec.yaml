@@ -11,6 +11,8 @@ dependencies:
   mapbox_maps_flutter: 2.26.0
   geolocator: ^14.1.2
   bluetooth_low_energy: 6.2.1
+  cryptography: 2.9.0
+  shared_preferences: 2.5.6
   flame: 1.38.2
   lottie: 3.6.1
 dev_dependencies:

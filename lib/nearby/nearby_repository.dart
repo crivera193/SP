@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../map/campus_fix.dart';
 import 'nearby_models.dart';
+import 'friend_protocol.dart';
 
 class SupabaseNearbyRepository implements NearbyRepository {
   SupabaseNearbyRepository(this.client);
@@ -94,7 +95,16 @@ class SupabaseNearbyRepository implements NearbyRepository {
           position = NearbyPosition(lat.toDouble(), lng.toDouble(), fresh);
         }
       }
-      peers.add(NearbyPeer(row['id'], row['label'], expires, position));
+      peers.add(
+        NearbyPeer(
+          row['id'],
+          row['label'],
+          expires,
+          position,
+          friendship: friendshipFrom(row['friendship']),
+          relationshipId: row['relationship_id'] as String?,
+        ),
+      );
       if (peers.length == config.maxPeers) break;
     }
     return NearbySnapshot(peers, config);

@@ -4,13 +4,28 @@ import 'dart:typed_data';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:geolocator/geolocator.dart' as gps;
 import 'nearby_models.dart';
+import 'friend_protocol.dart';
 
 /// Android/iOS share an app-only service UUID and two baseline ATT characteristics.
 /// Each value is exactly 16 bytes, below the baseline 20-byte write payload.
 class BleNearbyRadio implements NearbyRadio {
-  final _service = UUID.fromString(NearbyProtocol.service);
+  BleNearbyRadio({this.identity, this.onIdentity})
+    : _service = UUID.fromString(
+        identity == null
+            ? NearbyProtocol.service
+            : NearbyProtocol.offlineService,
+      );
+  final String? Function()? identity;
+  final void Function(String peerSession, String code)? onIdentity;
+  final friendWire = FriendWire();
+  final UUID _service;
+  final _identityId = UUID.fromString(NearbyProtocol.identity);
+  final _centralCodes = <UUID, String>{};
+  final _centralSessions = <UUID, String>{};
   final _sessionId = UUID.fromString(NearbyProtocol.session);
   final _challengeId = UUID.fromString(NearbyProtocol.challenge);
+  final _friendChannelId = UUID.fromString(NearbyProtocol.friendChannel);
+  final _friendDataId = UUID.fromString(NearbyProtocol.friendData);
   CentralManager? _central;
   PeripheralManager? _peripheral;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
@@ -178,6 +193,19 @@ class BleNearbyRadio implements NearbyRadio {
           isPrimary: true,
           includedServices: [],
           characteristics: [
+            if (identity != null)
+              GATTCharacteristic.mutable(
+                uuid: _identityId,
+                properties: [
+                  GATTCharacteristicProperty.read,
+                  GATTCharacteristicProperty.write,
+                ],
+                permissions: [
+                  GATTCharacteristicPermission.read,
+                  GATTCharacteristicPermission.write,
+                ],
+                descriptors: [],
+              ),
             GATTCharacteristic.mutable(
               uuid: _sessionId,
               properties: [GATTCharacteristicProperty.read],
@@ -188,6 +216,24 @@ class BleNearbyRadio implements NearbyRadio {
               uuid: _challengeId,
               properties: [GATTCharacteristicProperty.write],
               permissions: [GATTCharacteristicPermission.write],
+              descriptors: [],
+            ),
+            GATTCharacteristic.mutable(
+              uuid: _friendChannelId,
+              properties: [GATTCharacteristicProperty.write],
+              permissions: [GATTCharacteristicPermission.write],
+              descriptors: [],
+            ),
+            GATTCharacteristic.mutable(
+              uuid: _friendDataId,
+              properties: [
+                GATTCharacteristicProperty.read,
+                GATTCharacteristicProperty.write,
+              ],
+              permissions: [
+                GATTCharacteristicPermission.read,
+                GATTCharacteristicPermission.write,
+              ],
               descriptors: [],
             ),
           ],
@@ -244,6 +290,32 @@ class BleNearbyRadio implements NearbyRadio {
   ) async {
     final peripheral = _peripheral!;
     try {
+      if (_current(epoch) &&
+          e.characteristic.uuid == _identityId &&
+          identity?.call() != null) {
+        final value = UUID.fromString(identity!()!).value;
+        if (e.request.offset < 0 || e.request.offset > value.length) {
+          await peripheral.respondReadRequestWithError(
+            e.request,
+            error: GATTError.invalidOffset,
+          );
+          return;
+        }
+        await peripheral.respondReadRequestWithValue(
+          e.request,
+          value: Uint8List.fromList(value.sublist(e.request.offset)),
+        );
+        return;
+      }
+      if (_current(epoch) &&
+          e.characteristic.uuid == _friendDataId &&
+          e.request.offset == 0) {
+        await peripheral.respondReadRequestWithValue(
+          e.request,
+          value: friendWire.read(e.central.uuid.toString()),
+        );
+        return;
+      }
       if (!_current(epoch) ||
           e.characteristic.uuid != _sessionId ||
           _token == null) {
@@ -275,6 +347,49 @@ class BleNearbyRadio implements NearbyRadio {
     int epoch,
   ) async {
     try {
+      if (_current(epoch) && e.request.offset == 0) {
+        if (e.characteristic.uuid == _identityId &&
+            e.request.value.length == 16 &&
+            identity != null) {
+          if (_centralCodes.length < 64 ||
+              _centralCodes.containsKey(e.central.uuid)) {
+            _centralCodes[e.central.uuid] = UUID(e.request.value).toString();
+          }
+          await _peripheral!.respondWriteRequest(e.request);
+          return;
+        }
+        if (e.characteristic.uuid == _friendChannelId &&
+            e.request.value.length == 16) {
+          // A transport ACK is not authorization. Only the independent server
+          // check can bind a mailbox, and only encrypted key proof makes it ready.
+          await _peripheral!.respondWriteRequest(e.request);
+          if (_current(epoch)) {
+            unawaited(
+              friendWire
+                  .offer(
+                    UUID(e.request.value).toString(),
+                    e.central.uuid.toString(),
+                    peerToken: _centralSessions[e.central.uuid],
+                  )
+                  .catchError((Object _) => false),
+            );
+          }
+          return;
+        }
+        if (e.characteristic.uuid == _friendDataId &&
+            e.request.value.length >= 7 &&
+            e.request.value.length <= 20) {
+          await _peripheral!.respondWriteRequest(e.request);
+          if (_current(epoch)) {
+            unawaited(
+              friendWire
+                  .receiveFrom(e.central.uuid.toString(), e.request.value)
+                  .catchError((Object _) {}),
+            );
+          }
+          return;
+        }
+      }
       if (!_current(epoch) ||
           e.characteristic.uuid != _challengeId ||
           e.request.offset != 0 ||
@@ -286,6 +401,12 @@ class BleNearbyRadio implements NearbyRadio {
         return;
       }
       final nonce = UUID(e.request.value).toString();
+      if (identity != null) {
+        final code = _centralCodes[e.central.uuid];
+        if (code == null) return;
+        _centralSessions[e.central.uuid] = nonce;
+        onIdentity?.call(nonce, code);
+      }
       await _peripheral!.respondWriteRequest(e.request);
       if (_current(epoch)) unawaited(_confirm!(nonce));
     } catch (_) {
@@ -337,6 +458,27 @@ class BleNearbyRadio implements NearbyRadio {
         if (!_current(epoch) || bytes.length != 16) continue;
         final token = UUID(bytes).toString();
         if (token == _token) continue;
+        if (identity != null) {
+          final characteristic = characteristics
+              .where((c) => c.uuid == _identityId)
+              .firstOrNull;
+          final ownCode = identity!();
+          if (characteristic == null || ownCode == null) continue;
+          final code = await _central!
+              .readCharacteristic(peer, characteristic)
+              .timeout(const Duration(seconds: 3));
+          if (!_current(epoch) || code.length != 16) continue;
+          onIdentity?.call(token, UUID(code).toString());
+          await _central!
+              .writeCharacteristic(
+                peer,
+                characteristic,
+                value: Uint8List.fromList(UUID.fromString(ownCode).value),
+                type: GATTCharacteristicWriteType.withResponse,
+              )
+              .timeout(const Duration(seconds: 3));
+          if (!_current(epoch)) return;
+        }
         final nonce = await _challenge!(token);
         if (!_current(epoch) || nonce == null) continue;
         await _central!
@@ -347,6 +489,9 @@ class BleNearbyRadio implements NearbyRadio {
               type: GATTCharacteristicWriteType.withResponse,
             )
             .timeout(const Duration(seconds: 3));
+        if (_current(epoch)) {
+          await _exchangeFriend(peer, token, characteristics, epoch);
+        }
       } catch (_) {
         _known.remove(peer.uuid);
         _attempted.remove(peer.uuid);
@@ -361,6 +506,63 @@ class BleNearbyRadio implements NearbyRadio {
     }
   }
 
+  Future<void> _exchangeFriend(
+    Peripheral peer,
+    String token,
+    List<GATTCharacteristic> characteristics,
+    int epoch,
+  ) async {
+    final id = friendWire.channelFor(token);
+    if (id == null) return;
+    GATTCharacteristic? control, data;
+    for (final c in characteristics) {
+      if (c.uuid == _friendChannelId) control = c;
+      if (c.uuid == _friendDataId) data = c;
+    }
+    if (control == null || data == null) {
+      return; // older peers remain detectable
+    }
+    try {
+      await _central!
+          .writeCharacteristic(
+            peer,
+            control,
+            value: Uint8List.fromList(UUID.fromString(id).value),
+            type: GATTCharacteristicWriteType.withResponse,
+          )
+          .timeout(const Duration(seconds: 3));
+      final watch = Stopwatch()..start();
+      for (
+        var i = 0;
+        i < 64 && watch.elapsed < const Duration(seconds: 3);
+        i++
+      ) {
+        if (!_current(epoch) || friendWire.channelFor(token) != id) return;
+        final outgoing = friendWire.next(id);
+        if (outgoing.isNotEmpty) {
+          await _central!
+              .writeCharacteristic(
+                peer,
+                data,
+                value: outgoing,
+                type: GATTCharacteristicWriteType.withResponse,
+              )
+              .timeout(const Duration(seconds: 3));
+        }
+        if (!_current(epoch)) return;
+        final incoming = await _central!
+            .readCharacteristic(peer, data)
+            .timeout(const Duration(seconds: 3));
+        if (!_current(epoch)) return;
+        if (incoming.isNotEmpty) await friendWire.receive(id, incoming);
+        if (outgoing.isEmpty && incoming.isEmpty) break;
+      }
+    } catch (_) {
+      // Radio loss never upgrades authorization or delivers plaintext. Retained
+      // encrypted packets retry until authenticated ACK or authorization expiry.
+    }
+  }
+
   @override
   Future<void> stop() async {
     _active = false;
@@ -370,6 +572,9 @@ class BleNearbyRadio implements NearbyRadio {
     _exchangeTimer?.cancel();
     _known.clear();
     _attempted.clear();
+    _centralCodes.clear();
+    _centralSessions.clear();
+    friendWire.clear();
     final subscriptions = _subscriptions.toList();
     _subscriptions.clear();
     for (final sub in subscriptions) {

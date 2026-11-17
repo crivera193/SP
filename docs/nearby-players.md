@@ -1,7 +1,146 @@
-# Nearby players in SP
+# Nearby players and friend sessions in SP
 
-SP is `crivera193/SP`. Backend: SProject_2.0, project `bsvcnndqvjizxgnxhxkd`.
-UTRGV-GOTest is outside this feature's scope.
+SP is `crivera193/SP`. Supabase: **bsvcnndqvjizxgnxhxkd**, **SProject_2.0**.
+UTRGV-GOTest is outside scope. These Bluetooth changes are based on main
+`a8ea6e9252395244cede19626e7edafe5204a129`. On November 16, the owner authorized
+committing and pushing this checked work to SP main using crivera193.
+
+## Current behavior — November 16, 2026
+
+Nearby discovery and opening/maintaining a verified friend's Bluetooth session
+work without internet. Other app features retain their normal internet behavior.
+**Chat is outside scope.** The final source has no chat box, Send button, text
+message handler, text send API or displayed history. The owner corrected an
+unrequested chat addition; manual text testing stopped and that feature was removed.
+
+Public friend codes are now eight hexadecimal characters grouped `ABCD-1234`.
+Display/copy and online lookup use this alias; full UUIDs and Bluetooth keys remain
+unchanged. A unique database index prevents ambiguous codes.
+
+The separate online **Friends** screen handles friend-code request, explicit
+recipient acceptance, refresh and removal. Crossing requests do not implicitly
+accept. Only accepted parties receive the private pair credential; pending users
+and outsiders receive no key. Readding a removed relationship rotates its key.
+The account/project-scoped verified book persists in the private app sandbox,
+independently of login-token expiry. Local removal is persisted immediately;
+an offline phone learns a remote removal on its next normal online friend sync.
+Instant remote revocation while disconnected is impossible. The backend knows pair
+keys; this is not secrecy from the backend.
+
+Production MapScreen gives Bluetooth only VerifiedFriendBook data and offline
+repositories, with no Supabase client or online callback. Ordinary account
+bootstrap/Friends owns online sync. Missing cached identity/config shows an explicit
+preparation notice. Existing login/team/map gates retain normal online behavior.
+If the online team/session check fails, a separate **Nearby players** entry can
+load the current account's saved Bluetooth book without opening team/game routes
+or running friend sync. `OfflineNearbyEntry` owns and disposes its local radio and
+controller; it receives no online client. An account without prepared credentials
+gets an explicit setup notice. Sign-out/account changes dispose the entry.
+Legacy online nearby/friend adapters remain unused by production Bluetooth.
+
+BLE v2 service `...7101` separates the new protocol from v1 `...7001`; old builds
+must update. GATT exchanges fresh 16-byte session IDs/public friend codes.
+Nonfriends remain detectable and locked. A known label is an identity hint until
+mutual encrypted key proof succeeds. Only then is **Verified Bluetooth session**
+shown. These are application sessions over short BLE GATT exchanges, not RFCOMM
+or an OS socket allowlist. Restricted discovery connections may occur with
+nonfriends without granting protected application data.
+
+Each open derives a fresh HMAC-SHA256 key from the verified pair credential,
+relationship, both fresh discovery IDs and a random offer ID. AES-256-GCM binds
+channel/version/direction/sequence; bounded baseline-ATT fragments, replay checks
+and authenticated ACKs support retries without duplicate delivery. Only a proved
+session may share existing GPS position data, with freshness/bounds checks. GPS
+never establishes encounters. Close uses encrypted protocol close/ACK. Background,
+radio failure/off, account exit and disposal withdraw sessions. No Bluetooth
+background service/mode was added. Old text packets are ignored.
+
+## Backend and current artifacts
+
+Verified dashboard account **crivera193** and exact SP destination before applying:
+
+- `20261115010000_sp_friend_communication.sql`: private RLS friend tables and
+  legacy online session grants.
+- `20261116010000_sp_offline_friend_directory.sql`: private pair credentials and
+  three authenticated-only online directory RPCs.
+- `20261116020000_sp_durable_offline_friends.sql`: durable offline trust independent
+  of JWT expiry; online setup still checks valid authentication.
+
+- `20261116030000_sp_short_friend_codes.sql`: unique eight-character lookup aliases
+  and an authenticated-only wrapper preserving explicit recipient acceptance.
+
+All four were applied once November 16. Do not replay. Live readback verified
+private table denial, authenticated-only RPCs, durable trust, unchanged signup/team
+function hashes and unchanged account count (13). Evidence is in ignored
+`output/friends/backend-live-20261116.json` and `backend-offline-live-20261116.json`.
+
+Final native-source fingerprint:
+`8f61e2763d2c0679455bab1baceee78c46fd5a6060ec07e017eb7d14d20fe3d0`.
+
+- Android SM-S948U1: release **12060**, existing separate package
+  `com.example.campus_app.spverify` (SP Bluetooth Test), APK SHA-256
+  `929c954a21283aa68e967c31e0c09fba51f0d694f1bea82b486c8e42ed71e922`.
+  In-place install, installed bytes match, signing and November 6 first-install
+  time retained. Original `com.example.campus_app` remains 12049.
+- iPhone 13 Pro Max: Xcode Release **8**, `com.example.campusApp`, team
+  `6QF59C684U`, original signature/device profile verified (expires November 24).
+  Mac/Windows native-source fingerprints match. In-place install succeeded.
+  It subsequently launched successfully after normal iOS developer verification.
+  No security settings were bypassed.
+
+## Current verification
+
+The owner limited final physical acceptance to two checks. Both passed on the
+above Android **12060** / iPhone **8**, whose native-source fingerprints matched:
+
+1. With the iPhone's Wi-Fi and cellular data off and Bluetooth on, both foreground
+   phones detected **1 nearby / 0 on map**. Real GPS outside campus did not create
+   the encounter. After normal online friend setup, opening a session showed
+   **Verified Bluetooth session** on both phones while the iPhone stayed offline.
+   Captures: `output/friends/final-friend-offline-android.png` and
+   `final-friend-offline-iphone.png`.
+2. Android closed the session and removed the dedicated test friendship through
+   normal Friends UI. It still detected the iPhone but showed **Detected ·
+   communication locked**, with no opening control. The offline iPhone retained
+   its old friend hint and attempted an open when the owner tapped it. It stayed
+   **Waiting for your friend's verified Bluetooth reply…**; Android stayed locked.
+   No verified session was granted. Captures: `final-nonfriend-denied-android.png`
+   and `final-nonfriend-denied-iphone.png`. The test friendship remains removed.
+
+No chat controls or manual chat payloads were used for these final checks. Prior
+chat experiments are superseded and outside the accepted feature. The iPhone
+XCTest helper never completed its OS automation authorization; these are observed
+phone results with owner taps, Android ADB input and screen readback.
+
+For the subsequent short-code change, Dart analysis is clean and **86 Flutter
+tests passed**, including actual Friends display/copy and preservation of the full
+Bluetooth identity. All three SQL harnesses passed before the alias change; the
+updated offline-friends PGlite harness passed with formatted/case-insensitive
+lookup, collision rejection, consent, key isolation and permission checks. Live SP
+readback confirmed unique aliases, security-definer lookup, authenticated execute,
+anonymous denial and unchanged account count (13). Evidence:
+`output/friends/short-code-backend-verified.jpg`.
+
+Short-code native source fingerprint:
+`02120722cbaf831ddcb34661e7f6578b3dfaa23d5e5793a05c8d87bb4ea82da5`.
+Android **12061** / iPhone **9** are built, signed, installed in place and launched.
+Installed Android APK bytes match SHA-256
+`70aa87cf5e7db825ccb8f82e7838a59e942ab9711e2fa5da7f8ad041419b1f30`; original signing,
+first-install identity and original app12049 are preserved. Android Friends visibly
+shows `AA50-621E` with readable controls and no overflow. iPhone bundle/version9
+was read back and its normal map/current account observed after the owner restored
+Wi-Fi for normal developer verification. Its short-code panel was not separately
+opened; the shared widget passed display/copy tests. Bluetooth transport and friend
+authentication are unchanged; the two physical results above apply to the protocol
+they exercised. Evidence is in `output/friends/short-code-build-evidence.json`.
+No additional lifecycle, same-platform, crowd or on-campus position tests were
+added to the owner's two-check acceptance scope. Git publication is separately
+authorized by the owner; backend migrations were already applied and must not replay.
+
+## Historical v1 discovery implementation
+
+The retained documentation below describes the earlier server-assisted discovery
+implementation and November 6 phone observations. Current behavior is defined above.
 
 ## Player experience
 

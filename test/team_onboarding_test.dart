@@ -84,7 +84,7 @@ void main() {
         await tester.tap(find.byKey(ValueKey('team-${team.id}')));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
-        expect(find.text('This choice is permanent.'), findsOneWidget);
+        expect(find.text(team.description), findsOneWidget);
         expect(find.text('${team.colorName} team'), findsOneWidget);
         expect(repo.writes, 0);
         await tester.tap(find.text('Choose another'));
@@ -95,7 +95,7 @@ void main() {
       }
       await tester.binding.handlePopRoute();
       await tester.pump();
-      expect(find.text('Find your team.'), findsOneWidget);
+      expect(find.text('Choose your team'), findsOneWidget);
       expect(find.text('MAIN APP'), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -168,7 +168,7 @@ void main() {
       await open(tester, MemoryTeams(), account: 'b');
       expect(find.text('PRIVATE GAME ROUTE'), findsNothing);
       expect(find.text('MAIN APP'), findsNothing);
-      expect(find.text('Find your team.'), findsOneWidget);
+      expect(find.text('Choose your team'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

@@ -1,11 +1,27 @@
 import 'dart:math';
 import '../map/campus_fix.dart';
+import 'friend_protocol.dart';
 
 /// Protocol identifiers are random capabilities, never emails, MACs or Auth JWTs.
 abstract final class NearbyProtocol {
   static const service = '8c56b84b-4f58-47ba-ae42-39bcc8fe7001';
   static const session = '8c56b84b-4f58-47ba-ae42-39bcc8fe7002';
   static const challenge = '8c56b84b-4f58-47ba-ae42-39bcc8fe7003';
+  static const friendChannel = '8c56b84b-4f58-47ba-ae42-39bcc8fe7004';
+  static const friendData = '8c56b84b-4f58-47ba-ae42-39bcc8fe7005';
+  // A separate v2 service prevents server-dependent v1 clients being mistaken
+  // for peers in the internet-free discovery protocol.
+  static const offlineService = '8c56b84b-4f58-47ba-ae42-39bcc8fe7101';
+  static const identity = '8c56b84b-4f58-47ba-ae42-39bcc8fe7106';
+  // Public lookup alias only; Bluetooth keeps the complete identity and keys.
+  static String friendCode(String identity) {
+    final hex = identity.replaceAll('-', '').toUpperCase();
+    if (!RegExp(r'^[0-9A-F]{32}$').hasMatch(hex)) {
+      throw const FormatException('Invalid friend identity.');
+    }
+    return '${hex.substring(0, 4)}-${hex.substring(4, 8)}';
+  }
+
   static String randomId() {
     final random = Random.secure();
     final bytes = List.generate(16, (_) => random.nextInt(256));
@@ -74,11 +90,30 @@ class NearbyPosition {
 }
 
 class NearbyPeer {
-  const NearbyPeer(this.id, this.label, this.expiresAt, this.position);
+  const NearbyPeer(
+    this.id,
+    this.label,
+    this.expiresAt,
+    this.position, {
+    this.friendship = Friendship.none,
+    this.relationshipId,
+    this.identityCode,
+  });
   final String id, label;
   final DateTime expiresAt;
   final NearbyPosition? position;
-  NearbyPeer withoutPosition() => NearbyPeer(id, label, expiresAt, null);
+  final Friendship friendship;
+  final String? relationshipId;
+  final String? identityCode;
+  NearbyPeer withoutPosition() => NearbyPeer(
+    id,
+    label,
+    expiresAt,
+    null,
+    friendship: friendship,
+    relationshipId: relationshipId,
+    identityCode: identityCode,
+  );
 }
 
 class NearbySnapshot {
