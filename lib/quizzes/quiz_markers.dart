@@ -9,11 +9,13 @@ class QuizMarkers extends StatelessWidget {
     required this.locations,
     required this.positions,
     required this.revealed,
+    required this.canOpen,
     required this.onOpen,
   });
   final List<QuizLocation> locations;
   final Map<String, Offset> positions;
   final Set<String> revealed;
+  final bool Function(QuizLocation) canOpen;
   final void Function(QuizLocation) onOpen;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -34,6 +36,7 @@ class QuizMarkers extends StatelessWidget {
   );
   Widget _marker(QuizLocation l, Offset p, int index, BoxConstraints bounds) {
     final diamond = index < 0;
+    final enabled = !diamond && canOpen(l);
     final (width, height, anchorY) = diamond
         ? (90.0, 90.0, 75.0)
         : switch (l.animation) {
@@ -63,11 +66,12 @@ class QuizMarkers extends StatelessWidget {
       height: height,
       child: Semantics(
         label:
-            '${l.name}, ${l.owner?.displayName ?? 'unclaimed'}, ${diamond ? 'outside proximity' : 'nearby'}. Open quiz',
+            '${l.name}, ${l.owner?.displayName ?? 'unclaimed'}, ${diamond ? 'outside proximity' : 'nearby'}${enabled ? '. Open quiz' : ''}',
         button: true,
+        enabled: enabled,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => onOpen(l),
+          onTap: enabled ? () => onOpen(l) : null,
           child: RepaintBoundary(
             child: TeamLottie(
               key: ValueKey(asset),

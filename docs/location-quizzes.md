@@ -25,8 +25,10 @@ backend failure shows an explicit notice rather than invented gameplay data.
 The existing raw foreground GPS stream independently switches each location
 between a diamond and its horse/plant/cats. Initial settings retain **25 m entry /
 40 m exit**, three seconds of distinct provider evidence, at most 15 m reported
-uncertainty and at most 10 seconds of fix age. Tapping opens the quiz and does not
-control revelation. Departure or unavailable GPS restores diamonds. The owner's
+uncertainty and at most 10 seconds of fix age. Tapping opens the quiz only after
+confirmed proximity entry with a fresh eligible fix, rechecked at tap time.
+Outside diamonds cannot open it. Taps do not control revelation.
+Departure or unavailable GPS restores diamonds. The owner's
 team hue applies to both forms, retaining Lottie shading and dark details.
 
 SP's encrypted offline friend protocol is reused. Only an accepted friend with
@@ -189,3 +191,12 @@ applied live to `sp_quiz.questions` on November 17 (question version 2). Unanswe
 attempts containing the previous wording were retired so reopening loads the new
 text; answered history, cooldowns, scores and ownership were preserved. The quiz
 display widget check passed with the updated prompt.
+
+The subsequent proximity-only opening change passed analysis and all seven
+location quiz tests, including outside, nearby, lost eligibility and exit taps.
+Android emulator build 12066 (1080×2400, synthetic campus GPS) was installed in
+place: tapping Kitty Island's outside diamond kept the map open; entering its
+proximity and tapping its cat opened the quiz. No answers were submitted.
+Captures are `output/quizzes/proximity-outside-12066.png` and
+`proximity-inside-quiz-12066.png`; artifact identity and signing checks are in
+`output/quizzes/proximity-open-install.json`. Physical phones were not updated.

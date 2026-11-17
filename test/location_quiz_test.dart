@@ -315,6 +315,7 @@ void main() {
       };
       final key = GlobalKey();
       var opened = 0;
+      var canOpen = true;
       Future<void> render(Set<String> revealed) async {
         await tester.pumpWidget(
           MaterialApp(
@@ -327,6 +328,7 @@ void main() {
                     locations: locations,
                     positions: positions,
                     revealed: revealed,
+                    canOpen: (_) => canOpen,
                     onOpen: (_) => opened++,
                   ),
                 ),
@@ -344,7 +346,7 @@ void main() {
       expect(find.byKey(const ValueKey('horse:diamond')), findsOneWidget);
       await capture(tester, key, 'diamonds-390x844');
       await tester.tap(find.byKey(const ValueKey('horse:diamond')));
-      expect(opened, 1);
+      expect(opened, 0, reason: 'outside proximity cannot open a quiz');
       expect(
         find.byKey(const ValueKey('horse:diamond')),
         findsOneWidget,
@@ -352,6 +354,18 @@ void main() {
       );
       await render({'horse', 'plant', 'cats'});
       expect(find.byKey(const ValueKey('horse:0')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('horse:0')));
+      expect(opened, 1, reason: 'a nearby, eligible point can open its quiz');
+      canOpen = false;
+      await render({'horse', 'plant', 'cats'});
+      await tester.tap(find.byKey(const ValueKey('horse:0')));
+      expect(
+        opened,
+        1,
+        reason: 'lost eligibility blocks even a revealed marker',
+      );
+      canOpen = true;
+      await render({'horse', 'plant', 'cats'});
       expect(
         tester
             .widget<TeamLottie>(
@@ -374,6 +388,8 @@ void main() {
       await render({});
       expect(find.byKey(const ValueKey('horse:diamond')), findsOneWidget);
       expect(find.byKey(const ValueKey('horse:0')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('horse:diamond')));
+      expect(opened, 1, reason: 'leaving proximity disables the quiz again');
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox.shrink());
     },

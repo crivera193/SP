@@ -364,7 +364,11 @@ class _MapScreenState extends State<MapScreen>
   }
 
   Future<void> _openQuiz(QuizLocation point) async {
-    if (_quizOpen) return;
+    if (_quizOpen ||
+        !_revealedSpots.contains(point.id) ||
+        _quizReason(point.id) != null) {
+      return;
+    }
     _quizOpen = true;
     final session = QuizSession(
       _quizzes,
@@ -1189,6 +1193,7 @@ class _MapScreenState extends State<MapScreen>
                       locations: _quizzes.points,
                       positions: positions,
                       revealed: _revealedSpots,
+                      canOpen: (point) => _quizReason(point.id) == null,
                       onOpen: (point) => unawaited(_openQuiz(point)),
                     ),
             ),
