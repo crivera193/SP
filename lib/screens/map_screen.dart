@@ -11,19 +11,18 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../map/campus_geography.dart';
 import '../map/campus_style.dart';
-import '../map/kitty_island.dart';
 import '../map/campus_fix.dart';
-import '../games/game_spot.dart';
 import '../games/spot_proximity.dart';
-import '../widgets/kitty_island_cats.dart';
+import '../quizzes/quiz_models.dart';
+import '../quizzes/quiz_repository.dart';
+import '../quizzes/quiz_session.dart';
+import '../quizzes/quiz_screen.dart';
+import '../quizzes/quiz_markers.dart';
 import '../player/cowboy_motion.dart';
 import '../player/cowboy_travel.dart';
 import '../player/latest_projection.dart';
 import '../player/cowboy_sprite.dart';
 import '../widgets/mapbox_configuration_notice.dart';
-import '../widgets/monstera_leaf.dart';
-import '../widgets/stallion_spot.dart';
-import '../widgets/diamond_spot.dart';
 import '../nearby/nearby_controller.dart';
 import '../nearby/ble_nearby_radio.dart';
 import '../nearby/nearby_widgets.dart';
@@ -140,37 +139,11 @@ class _MapScreenState extends State<MapScreen>
   int _gpsGeneration = 0;
   StreamSubscription<gps.Position>? _gpsSubscription;
 
-  final _kittyPlacement = ValueNotifier<List<Offset>?>(null);
-  // Monstera leaf: longitude, latitude.
-  static const CampusPoint _monsteraLocation = CampusPoint(
-    -98.174994,
-    26.307521,
-  );
-
-  final _monsteraPlacement = ValueNotifier<Offset?>(null);
-
-  late final LatestProjection<Offset> _monsteraProjector;
-  // Stallion Point: 26.3063611, -98.1753889.
-  static const CampusPoint _stallionLocation = CampusPoint(
-    -98.1753889,
-    26.3063611,
-  );
-  final _stallionPlacement = ValueNotifier<Offset?>(null);
-  late final LatestProjection<Offset> _stallionProjector;
-
-  late final LatestProjection<List<Offset>> _kittyProjector;
-
-  // Arrival-only landmarks reuse the existing artwork coordinates. No combat,
-  // rewards or live gameplay records are created by these invitations.
-  final _proximity = SpotProximity(const [
-    GameSpot(
-      id: 'kitty-island',
-      name: 'Kitty Island',
-      point: KittyIsland.center,
-    ),
-    GameSpot(id: 'monstera', name: 'Monstera', point: _monsteraLocation),
-    GameSpot(id: 'stallion', name: 'Stallion Point', point: _stallionLocation),
-  ]);
+  late final QuizCatalog _quizzes;
+  final _quizPlacement = ValueNotifier<Map<String, Offset>?>(null);
+  late final LatestProjection<Map<String, Offset>> _quizProjector;
+  final _proximity = SpotProximity(const []);
+  bool _quizOpen = false;
 
   Set<String> _revealedSpots = const <String>{};
 
@@ -243,14 +216,9 @@ class _MapScreenState extends State<MapScreen>
       bearing: _cameraBearing,
     );
 
-    // ========================================
-    // KITTY ISLAND PROJECTION
-    // ========================================
-
-    _kittyProjector = LatestProjection<List<Offset>>(
+    _quizProjector = LatestProjection<Map<String, Offset>>(
       read: () async {
         final map = _map;
-
         if (map == null ||
             !_ready ||
             !_styleLoaded ||
@@ -258,86 +226,26 @@ class _MapScreenState extends State<MapScreen>
             _error != null) {
           return null;
         }
-
-        final positions = <Offset>[];
-
-        for (final point in KittyIsland.cats) {
-          final pixel = await map.pixelForCoordinate(_point(point));
-
-          if (!pixel.x.isFinite || !pixel.y.isFinite) {
-            return null;
-          }
-
-          positions.add(Offset(pixel.x, pixel.y));
-        }
-
-        // Fourth projection is the single Kitty Island landmark center.
-        // The three cats keep their existing individual coordinates.
-        final centerPixel = await map.pixelForCoordinate(
-          _point(KittyIsland.center),
+        final points = _quizzes.points;
+        final coordinates = <String, CampusPoint>{
+          for (final p in points) p.id: p.point,
+          for (final p in points)
+            for (var i = 0; i < p.markerPoints.length; i++)
+              '${p.id}#$i': p.markerPoints[i],
+        };
+        final pixels = await map.pixelsForCoordinates(
+          coordinates.values.map(_point).toList(),
         );
-        if (!centerPixel.x.isFinite || !centerPixel.y.isFinite) {
-          return null;
-        }
-        positions.add(Offset(centerPixel.x, centerPixel.y));
-
-        return positions;
+        final ids = coordinates.keys.toList();
+        return {
+          for (var i = 0; i < ids.length && i < pixels.length; i++)
+            if (pixels[i] case final ScreenCoordinate pixel)
+              if (pixel.x.isFinite && pixel.y.isFinite)
+                ids[i]: Offset(pixel.x, pixel.y),
+        };
       },
-
-      apply: (positions) {
-        if (mounted) {
-          _kittyPlacement.value = positions;
-        }
-      },
-    );
-
-    // Monstera leaf geographic projection.
-    _monsteraProjector = LatestProjection<Offset>(
-      read: () async {
-        final map = _map;
-
-        if (map == null ||
-            !_ready ||
-            !_styleLoaded ||
-            !_foreground ||
-            _error != null) {
-          return null;
-        }
-
-        final pixel = await map.pixelForCoordinate(_point(_monsteraLocation));
-
-        if (!pixel.x.isFinite || !pixel.y.isFinite) {
-          return null;
-        }
-
-        return Offset(pixel.x, pixel.y);
-      },
-      apply: (position) {
-        if (mounted) {
-          _monsteraPlacement.value = position;
-        }
-      },
-    );
-    // ========================================
-    // VAQUERO PROJECTION
-    // ========================================
-
-    _stallionProjector = LatestProjection<Offset>(
-      read: () async {
-        final map = _map;
-        if (map == null ||
-            !_ready ||
-            !_styleLoaded ||
-            !_foreground ||
-            _error != null) {
-          return null;
-        }
-        final pixel = await map.pixelForCoordinate(_point(_stallionLocation));
-        if (!pixel.x.isFinite || !pixel.y.isFinite) return null;
-        return Offset(pixel.x, pixel.y);
-      },
-      apply: (position) {
-        if (mounted) _stallionPlacement.value = position;
+      apply: (value) {
+        if (mounted) _quizPlacement.value = value;
       },
     );
 
@@ -356,7 +264,10 @@ class _MapScreenState extends State<MapScreen>
     _expiry = Timer.periodic(const Duration(seconds: 1), (_) => _expireGps());
 
     if (hasMapboxConfiguration) {
+      _quizzes = QuizCatalog(SupabaseQuizRepository(Supabase.instance.client));
+      _quizzes.addListener(_quizCatalogChanged);
       _initFriends();
+      unawaited(_quizzes.load());
       unawaited(_load());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _foreground) unawaited(_startGps(allowPrompt: true));
@@ -379,12 +290,12 @@ class _MapScreenState extends State<MapScreen>
 
     _travelTicker.dispose();
 
-    _kittyProjector.dispose();
-    _kittyPlacement.dispose();
-    _monsteraProjector.dispose();
-    _monsteraPlacement.dispose();
-    _stallionProjector.dispose();
-    _stallionPlacement.dispose();
+    if (hasMapboxConfiguration) {
+      _quizzes.removeListener(_quizCatalogChanged);
+      _quizzes.dispose();
+    }
+    _quizProjector.dispose();
+    _quizPlacement.dispose();
 
     _projector.dispose();
     _cowboyPlacement.dispose();
@@ -402,12 +313,12 @@ class _MapScreenState extends State<MapScreen>
         state == AppLifecycleState.paused) {
       if (!_foreground) return;
       _foreground = false;
+      if (hasMapboxConfiguration) _quizzes.setActive(false);
       _pendingGps = null;
       unawaited(_stopGps());
       _updateProximity(_proximity.unavailable);
 
-      _syncKittyCats();
-      _syncMonsteraLeaf();
+      _syncQuizLocations();
       _clearTravel();
 
       _cowboyMotion.stop();
@@ -415,10 +326,10 @@ class _MapScreenState extends State<MapScreen>
     } else if (state == AppLifecycleState.resumed) {
       if (_foreground) return;
       _foreground = true;
+      if (hasMapboxConfiguration) _quizzes.setActive(true);
       if (hasMapboxConfiguration) unawaited(_startGps());
 
-      _syncKittyCats();
-      _syncMonsteraLeaf();
+      _syncQuizLocations();
       _expireGps();
     }
   }
@@ -427,36 +338,55 @@ class _MapScreenState extends State<MapScreen>
   // KITTY ISLAND
   // ==========================================
 
-  void _syncKittyCats() {
+  void _syncQuizLocations() {
     if (!_foreground || !_ready || _error != null) {
-      _kittyProjector.cancel();
-      _kittyPlacement.value = null;
-
+      _quizProjector.cancel();
+      _quizPlacement.value = null;
       return;
     }
-
-    unawaited(_kittyProjector.request(invalidate: true));
+    unawaited(_quizProjector.request(invalidate: true));
   }
 
-  void _syncStallion() {
-    if (!_foreground || !_ready || _error != null) {
-      _stallionProjector.cancel();
-      _stallionPlacement.value = null;
-      return;
+  void _quizCatalogChanged() {
+    if (!mounted) return;
+    _updateProximity(
+      () => _proximity.replaceSpots(_quizzes.points, DateTime.now()),
+    );
+    setState(() {});
+    _syncQuizLocations();
+  }
+
+  String? _quizReason(String id) {
+    final point = _quizzes.find(id);
+    if (point == null) return 'This quiz location is unavailable.';
+    if (!_foreground) return 'Return to SP to answer.';
+    if (_quizzes.error != null) return _quizzes.error;
+    return _proximity.attackReason(point, DateTime.now());
+  }
+
+  Future<void> _openQuiz(QuizLocation point) async {
+    if (_quizOpen) return;
+    _quizOpen = true;
+    final session = QuizSession(
+      _quizzes,
+      point.id,
+      () => _proximity.currentFix,
+      () => _quizReason(point.id),
+    );
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(builder: (_) => QuizScreen(session: session)),
+      );
+    } finally {
+      session.dispose();
+      _quizOpen = false;
+      if (mounted) {
+        _updateProximity(_proximity.dismiss);
+        unawaited(_quizzes.load());
+      }
     }
-    unawaited(_stallionProjector.request(invalidate: true));
   }
 
-  void _syncMonsteraLeaf() {
-    _syncStallion();
-    if (!_foreground || !_ready || _error != null) {
-      _monsteraProjector.cancel();
-      _monsteraPlacement.value = null;
-      return;
-    }
-
-    unawaited(_monsteraProjector.request(invalidate: true));
-  }
   // ==========================================
   // CLEAR VAQUERO TRAVEL
   // ==========================================
@@ -646,12 +576,8 @@ class _MapScreenState extends State<MapScreen>
 
   Future<void> _load() async {
     _updateProximity(_proximity.unavailable);
-    _kittyProjector.cancel();
-    _kittyPlacement.value = null;
-    _monsteraProjector.cancel();
-    _monsteraPlacement.value = null;
-    _stallionProjector.cancel();
-    _stallionPlacement.value = null;
+    _quizProjector.cancel();
+    _quizPlacement.value = null;
 
     _clearTravel();
     _cowboyMotion.stop();
@@ -789,8 +715,7 @@ class _MapScreenState extends State<MapScreen>
         _ready = true;
       });
 
-      _syncKittyCats();
-      _syncMonsteraLeaf();
+      _syncQuizLocations();
 
       final pending = _pendingGps;
       _pendingGps = null;
@@ -1080,7 +1005,7 @@ class _MapScreenState extends State<MapScreen>
   // ==========================================
 
   Future<void> _followPosition(CampusPoint point) async {
-    if (!_ready || !_following || !_foreground) {
+    if (!_ready || !_following || !_foreground || _quizOpen) {
       return;
     }
 
@@ -1242,8 +1167,7 @@ class _MapScreenState extends State<MapScreen>
 
               onCameraChangeListener: (_) {
                 _nearbyCamera.value++;
-                _syncKittyCats();
-                _syncMonsteraLeaf();
+                _syncQuizLocations();
 
                 unawaited(_projector.request(invalidate: true));
               },
@@ -1268,101 +1192,34 @@ class _MapScreenState extends State<MapScreen>
                     _error = 'Campus map could not load.';
                   });
 
-                  _syncKittyCats();
-                  _syncMonsteraLeaf();
+                  _syncQuizLocations();
                 }
               },
             ),
 
-          // ==================================
-          // KITTY ISLAND CATS
-          // ==================================
           Positioned.fill(
-            child: ValueListenableBuilder<List<Offset>?>(
-              valueListenable: _kittyPlacement,
-
-              builder: (_, positions, _) {
-                if (positions == null) {
-                  return const SizedBox.shrink();
-                }
-
-                if (positions.length != KittyIsland.cats.length + 1) {
-                  return const SizedBox.shrink();
-                }
-                return Stack(
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    if (_revealedSpots.contains('kitty-island'))
-                      KittyIslandCats(
-                        positions: positions
-                            .take(KittyIsland.cats.length)
-                            .toList(),
-                      )
-                    else
-                      DiamondSpot(
-                        position: positions.last,
-                        width: 90,
-                        height: 90,
-                        anchorY: 75,
-                      ),
-                  ],
-                );
-              },
+            child: ValueListenableBuilder<Map<String, Offset>?>(
+              valueListenable: _quizPlacement,
+              builder: (_, positions, _) => positions == null
+                  ? const SizedBox.shrink()
+                  : QuizMarkers(
+                      locations: _quizzes.points,
+                      positions: positions,
+                      revealed: _revealedSpots,
+                      onOpen: (point) => unawaited(_openQuiz(point)),
+                    ),
             ),
           ),
-
-          // ==================================
-          // MONSTERA LEAF GPS OVERLAY
-          // ==================================
-          Positioned.fill(
-            child: ValueListenableBuilder<Offset?>(
-              valueListenable: _monsteraPlacement,
-              builder: (_, position, _) {
-                if (position == null) {
-                  return const SizedBox.shrink();
-                }
-
-                return Stack(
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    if (_revealedSpots.contains('monstera'))
-                      MonsteraSpot(position: position)
-                    else
-                      DiamondSpot(
-                        position: position,
-                        width: 90,
-                        height: 110,
-                        anchorY: 110,
-                      ),
-                  ],
-                );
-              },
+          if (_ready &&
+              (_quizzes.error != null ||
+                  !_quizzes.loaded ||
+                  _quizzes.points.isEmpty))
+            Positioned(
+              left: 12,
+              right: 76,
+              bottom: 100,
+              child: SafeArea(child: QuizCatalogNotice(catalog: _quizzes)),
             ),
-          ),
-          // ==================================
-          // STALLION LOTTIE GAME SPOT
-          Positioned.fill(
-            child: ValueListenableBuilder<Offset?>(
-              valueListenable: _stallionPlacement,
-              builder: (context, position, _) {
-                if (position == null) return const SizedBox.shrink();
-                return Stack(
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    if (_revealedSpots.contains('stallion'))
-                      StallionSpot(position: position)
-                    else
-                      DiamondSpot(
-                        position: Offset(position.dx + 10, position.dy),
-                        width: 120,
-                        height: 120,
-                        anchorY: 75,
-                      ),
-                  ],
-                );
-              },
-            ),
-          ),
 
           // ANIMATED VAQUERO
           // ==================================
@@ -1415,7 +1272,18 @@ class _MapScreenState extends State<MapScreen>
                           _proximity.selected!.name,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
-                        const Text('You have arrived.'),
+                        const Text(
+                          'You have arrived. Stop walking to answer a quiz.',
+                        ),
+                        FilledButton(
+                          onPressed: () {
+                            final point = _quizzes.find(
+                              _proximity.selected!.id,
+                            );
+                            if (point != null) unawaited(_openQuiz(point));
+                          },
+                          child: const Text('Open quiz'),
+                        ),
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton(

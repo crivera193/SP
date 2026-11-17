@@ -12,7 +12,7 @@ try {
     ('00000000-0000-4000-8000-000000000001','one@utrgv.edu'),
     ('00000000-0000-4000-8000-000000000002','two@utrgv.edu'),
     ('00000000-0000-4000-8000-000000000003','three@utrgv.edu');`);
-  for (const name of ['20261105010000_sp_bluetooth_nearby.sql','20261115010000_sp_friend_communication.sql']) {
+  for (const name of ['20261105010000_sp_bluetooth_nearby.sql','20261115010000_sp_friend_communication.sql','20261117011000_sp_friend_only_positions.sql']) {
     await db.exec(await readFile(new URL('../supabase/migrations/'+name,import.meta.url),'utf8'));
   }
   const q = async (sql,args=[]) => (await db.query(sql,args)).rows;
@@ -25,6 +25,7 @@ try {
     sessions.push((await rpc('sp_nearby_open',[`10000000-0000-4000-8000-00000000000${n}`])).token);
   }
   const [a,b,c]=sessions;
+  await db.exec("update sp_nearby.sessions set latitude=0,longitude=0,accuracy_m=3,fix_at=clock_timestamp()");
   const ids=(await q('select token,public_id from sp_nearby.sessions'));
   const peerId=t=>ids.find(x=>x.token===t).public_id;
   async function encounter(from,to) {
@@ -41,6 +42,7 @@ try {
   let peers=(await rpc('sp_nearby_read',[a])).players;
   assert.equal(peers.length,2,'nonfriends remain discoverable');
   assert.ok(peers.every(x=>x.friendship==='none'));
+  assert.ok(peers.every(x=>x.position===null),'nonfriends cannot receive GPS through legacy RPC');
   await assert.rejects(open(),/friend_verification_required/);
   const relationship=await rpc('sp_friends_request',[a,peerId(b)]);
   assert.equal(await rpc('sp_friends_request',[a,peerId(b)]),relationship,'request retries are idempotent');
@@ -63,6 +65,10 @@ try {
   await db.exec('update sp_nearby.settings set friend_limit=100,communication_s=30');
   peers=(await rpc('sp_nearby_read',[a])).players;
   assert.equal(peers.find(x=>x.id===peerId(b)).friendship,'accepted');
+  await db.exec("update sp_nearby.sessions set fix_at=clock_timestamp()");
+  peers=(await rpc('sp_nearby_read',[a])).players;
+  assert.ok(peers.find(x=>x.id===peerId(b)).position,'accepted friend with fresh Bluetooth may receive legacy GPS');
+  assert.equal(peers.find(x=>x.id===peerId(c)).position,null,'other nearby player remains locked');
   assert.ok(peers.every(x=>x.key_hex===undefined && x.peer_token===undefined),'discovery leaks no channel secrets');
   await actor(2);
   const recipient=await rpc('sp_friend_channel_check',[b,ticket.id]);
@@ -75,7 +81,9 @@ try {
   await actor(1);
   await rpc('sp_friends_respond',[a,relationship,'remove']);
   assert.equal(await rpc('sp_friend_channel_check',[a,ticket.id]),null,'removal revokes channel and key');
-  assert.equal((await rpc('sp_nearby_read',[a])).players.length,2,'removal preserves detection');
+  const afterRemoval=(await rpc('sp_nearby_read',[a])).players;
+  assert.equal(afterRemoval.length,2,'removal preserves detection');
+  assert.ok(afterRemoval.every(x=>x.position===null),'removal withdraws legacy GPS immediately');
   const next=await rpc('sp_friends_request',[a,peerId(b)]);
   await actor(2); await rpc('sp_friends_respond',[b,next,'accept']);
   await actor(1); const reopened=await open();

@@ -63,7 +63,7 @@ class NearbyPanel extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Bluetooth finds players nearby. Only verified friends can open a communication session. Detection and friend sessions work without internet. Keep SP open.',
+                'Bluetooth finds players nearby. Only verified friends in an open, verified Bluetooth session can share GPS positions on the map. This works without internet. Keep SP open.',
               ),
               const SizedBox(height: 12),
               Text(controller.status, key: const ValueKey('nearby-status')),

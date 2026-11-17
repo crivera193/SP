@@ -99,7 +99,7 @@ class OfflineNearbyRepository implements NearbyRepository {
           book.byCode(identities[e.key]!)?.label ??
               'Player ${e.key.substring(0, 4)}',
           e.value.add(config.encounter),
-          _positions[e.key],
+          book.byCode(identities[e.key]!) == null ? null : _positions[e.key],
           friendship: book.byCode(identities[e.key]!) == null
               ? Friendship.none
               : Friendship.accepted,
@@ -110,10 +110,9 @@ class OfflineNearbyRepository implements NearbyRepository {
   }
 
   void position(String peer, NearbyPosition? position) {
-    if (!fresh(peer)) return;
     if (position == null) {
       _positions.remove(peer);
-    } else {
+    } else if (fresh(peer) && book.byCode(identities[peer] ?? '') != null) {
       _positions[peer] = position;
     }
   }

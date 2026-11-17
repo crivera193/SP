@@ -81,8 +81,7 @@ class FriendController extends ChangeNotifier {
         if (channel.closing) continue;
         if (await _authorize(channel, epoch) &&
             channel.ready &&
-            localPosition != null &&
-            channel.pendingPosition == null) {
+            localPosition != null) {
           await _serial(channel, () async {
             final bytes = await channel.cipher.encrypt({
               'type': 'position',
@@ -90,6 +89,11 @@ class FriendController extends ChangeNotifier {
             });
             if (!_current(epoch) || _channels[channel.grant.id] != channel) {
               return;
+            }
+            // GPS is the latest state. A lost ACK must not keep retransmitting
+            // an old fix while newer fixes (or GPS loss) wait behind it.
+            if (channel.pendingPosition case final int previous) {
+              wire.acknowledge(channel.grant.id, previous);
             }
             wire.queue(channel.grant.id, bytes);
             channel.pendingPosition = ByteData.sublistView(bytes).getUint32(0);
@@ -330,6 +334,7 @@ class FriendController extends ChangeNotifier {
   void _armClose(FriendConversation c) {
     c.closing = true;
     c.ready = false;
+    onPosition?.call(c.grant.peerId, null);
     c.closingTimer ??= Timer(
       c.grant.expiresAt.difference(DateTime.now()).isNegative
           ? Duration.zero
@@ -343,6 +348,7 @@ class FriendController extends ChangeNotifier {
 
   Future<void> _drop(String id) {
     final channel = _channels.remove(id), session = _session;
+    if (channel != null) onPosition?.call(channel.grant.peerId, null);
     channel?.closingTimer?.cancel();
     wire.detach(id);
     _closed.add(id);

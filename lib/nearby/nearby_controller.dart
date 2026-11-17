@@ -43,7 +43,15 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
   NearbyConfig? _config;
   CampusFix? _fix;
   List<NearbyPeer> _peers = const [];
-  List<NearbyPeer> get peers => List.unmodifiable(_peers);
+  bool hasVerifiedSession(String peer) =>
+      friends?.conversationFor(peer)?.ready == true;
+  List<NearbyPeer> get peers => List.unmodifiable(
+    _peers.map(
+      (p) => p.friendship == Friendship.accepted && hasVerifiedSession(p.id)
+          ? p
+          : p.withoutPosition(),
+    ),
+  );
   Future<void> _tail = Future.value(), _cleanup = Future.value();
   Timer? _timer, _expiry;
   final Map<String, DateTime> _receipts = {};
@@ -60,7 +68,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
           ? 'Nearby players unavailable'
           : _peers.isEmpty
           ? 'Bluetooth on · no players detected'
-          : '${_peers.length} nearby · ${_peers.where((p) => p.position != null).length} on map');
+          : '${_peers.length} nearby · ${peers.where((p) => p.position != null).length} on map');
 
   Future<void> enable() {
     if (_disposed || busy || running) return Future.value();
