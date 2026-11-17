@@ -105,10 +105,6 @@ class _QuizScreenState extends State<QuizScreen> {
               if (point != null) ...[
                 const SizedBox(height: 24),
                 QuizScoreboard(location: point),
-                if (point.description.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(point.description),
-                ],
               ],
               const SizedBox(height: 24),
               TextButton(
@@ -180,8 +176,6 @@ class QuizScoreboard extends StatelessWidget {
                   ),
                 ),
               ),
-            const SizedBox(height: 8),
-            const Text('Ties go to the team that reached the score first.'),
           ],
         ),
       ),

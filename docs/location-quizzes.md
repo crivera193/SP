@@ -170,7 +170,7 @@ evidence, including the failed timing-only attempt.
 
 The question and True/False answers now precede a horizontal team-color bar chart.
 Bars scale to the highest score; zero scores retain empty colored tracks. The
-location description follows the scores. The map GPS status banner and automatic
+map GPS status banner and automatic
 arrival card are removed; point taps and location eligibility checks remain.
 The Bluetooth introductory blurb and the Friends paragraph above the friend code
 are removed, as clarified by the owner. The Friends display/copy widget check passed.
@@ -200,3 +200,8 @@ proximity and tapping its cat opened the quiz. No answers were submitted.
 Captures are `output/quizzes/proximity-outside-12066.png` and
 `proximity-inside-quiz-12066.png`; artifact identity and signing checks are in
 `output/quizzes/proximity-open-install.json`. Physical phones were not updated.
+
+The owner's subsequent highlighted-text correction removes the tie explanation
+and location description from the quiz display. Analysis and all seven quiz
+tests passed. Emulator build 12067 was inspected at 1080×2400; screenshots are
+`output/quizzes/quiz-cleaned-12067.png` and `bluetooth-modal-12067.png`.
