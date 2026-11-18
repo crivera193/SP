@@ -59,7 +59,7 @@ class _QuizScreenState extends State<QuizScreen> {
                 if (a.answered) ...[
                   Text(
                     a.correct == true
-                        ? 'Correct! One point saved for your team.'
+                        ? 'Correct! ${a.awardedPoints} ${a.awardedPoints == 1 ? 'point' : 'points'} saved for your team.'
                         : 'Incorrect. No points awarded.',
                     key: const ValueKey('quiz-result'),
                     style: Theme.of(context).textTheme.titleMedium,
@@ -126,7 +126,7 @@ class QuizScoreboard extends StatelessWidget {
   Widget build(BuildContext context) {
     final highest = location.scores.fold<int>(
       0,
-      (value, score) => score.correct > value ? score.correct : value,
+      (value, score) => score.points > value ? score.points : value,
     );
     return Card(
       child: Padding(
@@ -146,7 +146,7 @@ class QuizScoreboard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Semantics(
-                  label: '${score.team.displayName}, ${score.correct} correct',
+                  label: '${score.team.displayName}, ${score.points} points',
                   child: ExcludeSemantics(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -155,7 +155,7 @@ class QuizScoreboard extends StatelessWidget {
                           children: [
                             Expanded(child: Text(score.team.displayName)),
                             const SizedBox(width: 12),
-                            Text('${score.correct} correct'),
+                            Text('${score.points} points'),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -163,7 +163,7 @@ class QuizScoreboard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(6),
                           child: LinearProgressIndicator(
                             key: ValueKey('quiz-score-${score.team.id}'),
-                            value: highest == 0 ? 0 : score.correct / highest,
+                            value: highest == 0 ? 0 : score.points / highest,
                             minHeight: 12,
                             color: score.team.color,
                             backgroundColor: score.team.color.withValues(

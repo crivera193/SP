@@ -9,6 +9,28 @@ crivera193 on November 17.
 
 ## Behavior
 
+November 18 revision (backend applied; phone verification in progress): correct answers award **1 point below
+level 10** and **2 points from level 10 onward**, capped at 2. The owner selected
+team/location awards. `sp_quiz.scores.points` determines ownership and scoreboard
+bars; `correct` preserves the raw correct-answer count. Historical scores start
+with points equal to their original counts. Existing answered attempts retain
+their original awards; retries return their saved `awarded_points` and
+`reward_level`, even after a rule or level changes. New answers use the current
+server-confirmed level/settings. Wrong answers award zero. Cooldowns and proximity
+checks remain in effect.
+
+`20261118010000_sp_bluetooth_contacts.sql` and
+`20261118011000_sp_level_quiz_points.sql` were applied together once to SP2.0 on
+November 18, before installing Android 12072. Do not replay them. Live account
+reads confirmed the weighted-score catalog contract; old scores/attempt digests
+were preserved. Level time comes
+only from matched saved-friend contact reports; see
+[nearby-players.md](nearby-players.md). Isolated PostgreSQL checks and the two-point
+phone-layout widget check passed. The latter uses synthetic data, with its actual
+render at `output/quizzes/weighted-score-390x844.png`; it is not a native phone capture.
+
+The following describes the previously deployed one-point quiz behavior.
+
 Locations open **A. True / B. False** quizzes. The current database-authored
 placeholder is “Question:True or False”. Correct answers add one to that location's
 team total; incorrect answers add nothing. Both owning and opposing teams may

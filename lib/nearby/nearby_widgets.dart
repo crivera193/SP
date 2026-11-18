@@ -7,6 +7,7 @@ import 'nearby_controller.dart';
 import 'nearby_models.dart';
 import 'friend_protocol.dart';
 import 'friend_controller.dart';
+import 'contact_log.dart';
 
 class NearbyButton extends StatelessWidget {
   const NearbyButton({super.key, required this.controller});
@@ -63,6 +64,29 @@ class NearbyPanel extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(controller.status, key: const ValueKey('nearby-status')),
+              if (controller.contacts case final ContactLog contacts) ...[
+                const SizedBox(height: 12),
+                if (contacts.progress case final ContactProgress progress) ...[
+                  Text(
+                    'Level ${progress.level}',
+                    key: const ValueKey('contact-level'),
+                  ),
+                  Text(
+                    'Correct quiz: ${progress.quizPoints} ${progress.quizPoints == 1 ? 'point' : 'points'}',
+                  ),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: progress.secondsIntoLevel / progress.secondsPerLevel,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${_time(progress.secondsIntoLevel)} / ${_time(progress.secondsPerLevel)}',
+                  ),
+                ] else
+                  Text(contacts.error ?? 'Level unavailable.'),
+                if (contacts.progress != null && contacts.error != null)
+                  Text(contacts.error!),
+              ],
               if (controller.friends case final FriendController friends)
                 ..._friendControls(context, friends),
               const SizedBox(height: 12),
@@ -99,6 +123,9 @@ class NearbyPanel extends StatelessWidget {
       ),
     ),
   );
+
+  static String _time(int seconds) =>
+      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 
   List<Widget> _friendControls(BuildContext context, FriendController friends) {
     final disabled = friends.busy || !controller.running;

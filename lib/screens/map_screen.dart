@@ -31,6 +31,8 @@ import '../nearby/online_friend_directory.dart';
 import '../nearby/offline_nearby_repository.dart';
 import '../nearby/offline_friend_repository.dart';
 import '../nearby/friend_directory_widgets.dart';
+import '../nearby/contact_log.dart';
+import '../nearby/contact_progress_sync.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -44,6 +46,8 @@ class _MapScreenState extends State<MapScreen>
   NearbyController? _nearby;
   VerifiedFriendBook? _friendBook;
   OnlineFriendDirectory? _friendDirectory;
+  ContactLog? _contacts;
+  ContactProgressSync? _contactSync;
   final _nearbyCamera = ValueNotifier<int>(0);
   NearbyController get _nearbyController {
     if (_nearby == null) _initFriends();
@@ -56,6 +60,10 @@ class _MapScreenState extends State<MapScreen>
     final book = VerifiedFriendBook(client.auth.currentUser!.id);
     _friendBook = book;
     _friendDirectory = OnlineFriendDirectory(client, book);
+    final contacts = ContactLog(book.account);
+    _contacts = contacts;
+    _contactSync = ContactProgressSync(client, contacts);
+    unawaited(_contactSync!.start());
     final local = OfflineNearbyRepository(book);
     final radio = BleNearbyRadio(
       identity: () => book.selfCode,
@@ -64,6 +72,7 @@ class _MapScreenState extends State<MapScreen>
     _nearby = NearbyController(
       local,
       radio,
+      contacts: contacts,
       friendRepository: OfflineFriendRepository(local),
       friendWire: radio.friendWire,
       localPosition: local.encodePosition,
@@ -278,6 +287,8 @@ class _MapScreenState extends State<MapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _nearby?.dispose();
+    _contactSync?.dispose();
+    _contacts?.dispose();
     _friendBook?.removeListener(_friendsChanged);
     _friendDirectory?.dispose();
     _friendBook?.dispose();

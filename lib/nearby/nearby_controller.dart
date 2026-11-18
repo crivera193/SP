@@ -4,6 +4,7 @@ import '../map/campus_fix.dart';
 import 'nearby_models.dart';
 import 'friend_controller.dart';
 import 'friend_protocol.dart';
+import 'contact_log.dart';
 
 /// Owns one account's discovery session. GPS can update position data, never peers.
 class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
@@ -11,6 +12,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
     this.repository,
     this.radio, {
     this.observeLifecycle = true,
+    this.contacts,
     FriendRepository? friendRepository,
     FriendWire? friendWire,
     Map<String, dynamic>? Function()? localPosition,
@@ -23,7 +25,8 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
                onPosition: onPosition,
              )
            : null {
-    friends?.addListener(_notify);
+    friends?.addListener(_friendsChanged);
+    contacts?.addListener(_notify);
     if (observeLifecycle) {
       WidgetsBinding.instance.addObserver(this);
       final state = WidgetsBinding.instance.lifecycleState;
@@ -34,6 +37,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
   final NearbyRadio radio;
   final bool observeLifecycle;
   final FriendController? friends;
+  final ContactLog? contacts;
   bool enabled = false, busy = false, running = false;
   bool _active = true, _disposed = false;
   int? _pollingEpoch;
@@ -91,6 +95,29 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
       !_disposed && enabled && _active && epoch == _epoch;
   void _notify() {
     if (!_disposed) notifyListeners();
+  }
+
+  void _friendsChanged() {
+    _recordContacts();
+    _notify();
+  }
+
+  void _recordContacts() {
+    final session = _session, config = _config;
+    if (!running ||
+        !_active ||
+        _disposed ||
+        session == null ||
+        config == null) {
+      return;
+    }
+    contacts?.sample(session.token, _peers, config.encounter, {
+      for (final peer in _peers)
+        if (peer.friendship == Friendship.accepted && peer.identityCode != null)
+          peer.id: session.token.compareTo(peer.id) < 0
+              ? session.token
+              : peer.id,
+    });
   }
 
   Future<void> _start() {
@@ -212,6 +239,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
       expire();
       await friends?.refresh();
       if (!_current(epoch)) return;
+      _recordContacts();
       _notify();
     } catch (_) {
       if (_current(epoch)) {
@@ -248,6 +276,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
       _notify();
     }
     friends?.expire(nearby: _peers.map((p) => p.id).toSet());
+    _recordContacts();
   }
 
   Future<void> _fail(String message) async {
@@ -257,6 +286,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _stop() async {
     _epoch++;
+    contacts?.pause();
     _timer?.cancel();
     _expiry?.cancel();
     final session = _session;
@@ -304,6 +334,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     if (observeLifecycle) WidgetsBinding.instance.removeObserver(this);
     _disposed = true;
+    contacts?.removeListener(_notify);
     unawaited(_stop());
     friends?.removeListener(_notify);
     friends?.dispose();

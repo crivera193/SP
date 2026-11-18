@@ -76,11 +76,14 @@ class QuizLocation extends GameSpot {
 class TeamScore {
   TeamScore.fromJson(Map<String, dynamic> j)
     : team = GameTeam.fromJson(Map<String, dynamic>.from(j['team'] as Map)),
-      correct = j['correct'] as int {
-    if (correct < 0) throw const FormatException('Invalid quiz score.');
+      correct = j['correct'] as int,
+      points = j['points'] as int {
+    if (correct < 0 || points < 0) {
+      throw const FormatException('Invalid quiz score.');
+    }
   }
   final GameTeam team;
-  final int correct;
+  final int correct, points;
 }
 
 class QuizAttempt {
@@ -90,15 +93,27 @@ class QuizAttempt {
       status = j['status'] as String,
       correct = j['correct'] as bool?,
       selected = j['selected'] as bool?,
+      awardedPoints = j['awarded_points'] as int?,
+      rewardLevel = j['reward_level'] as int?,
       serverNow = DateTime.parse(j['server_now'] as String),
       retryAt = j['retry_at'] == null
           ? null
           : DateTime.parse(j['retry_at'] as String),
       location = QuizLocation.fromJson(
         Map<String, dynamic>.from(j['location'] as Map),
-      );
+      ) {
+    if (answered &&
+        (correct == null ||
+            awardedPoints == null ||
+            rewardLevel == null ||
+            rewardLevel! < 1 ||
+            (correct! ? awardedPoints! <= 0 : awardedPoints != 0))) {
+      throw const FormatException('Invalid quiz reward receipt.');
+    }
+  }
   final String id, prompt, status;
   final bool? correct, selected;
+  final int? awardedPoints, rewardLevel;
   final DateTime serverNow;
   final DateTime? retryAt;
   final QuizLocation location;

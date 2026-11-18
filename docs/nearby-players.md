@@ -7,6 +7,89 @@ committing and pushing this checked work to SP main using crivera193.
 
 ## Current behavior — November 16, 2026
 
+### November 18 contact logging and levels
+
+The requested contact logger reuses actual service-filtered BLE GATT discovery.
+It records timestamps and app session/identity IDs, with no email, device name,
+hardware address or GPS in contact records. An account/project-scoped local
+queue preserves report IDs across restarts and upload retries. The radio and
+offline repositories receive no HTTP client; ordinary account work syncs logs
+separately. Fresh receipts are required, and paused/background/radio-off time
+never advances the contact clock.
+
+Only saved verified friends qualify for level time, as selected by the owner.
+Logging uses the existing discovery handshake and never opens a GPS-sharing
+session automatically. Only matching reports from both authenticated accounts,
+with the same session pair and contact ID, add shared time. PostgreSQL
+range unions prevent overlapping friends and duplicate uploads multiplying it.
+Earned time survives friendship removal; future time with that removed friend
+does not qualify. Incorrect-clock reports remain logs without awarding time.
+This is report validation, not hardware attestation of physical distance.
+
+`sp_contacts.settings.seconds_per_level` starts at 600; level starts at 1.
+The Nearby panel displays confirmed level/progress and retains the last confirmed
+value when a sync fails. Offline observations wait for both phones' later uploads.
+The migrations are `20261118010000_sp_bluetooth_contacts.sql` followed by
+`20261118011000_sp_level_quiz_points.sql`; both were applied to SP2.0 on November 18
+before installing the new client. Do not replay them. Friends remains disabled
+and labels hidden. The owner chose team/location quiz awards: 1 point below
+level 10, 2 at level 10 and above, capped at 2. The editable settings are
+`bonus_from_level`, `base_quiz_points` and `bonus_quiz_points` in
+`sp_contacts.settings`. These do not change the independent per-location quiz cooldown.
+
+Checks so far: isolated PostgreSQL pairing/threshold/retry/overlap/permissions
+checks (`node tool/check_contacts_sql.mjs`); pure/local-service tests covering
+freshness, pause, clock changes, account isolation, logging without opening GPS
+sessions or HTTP, lost upload responses and persisted receipt retries.
+The populated level display was inspected as a widget render with synthetic data,
+not a phone capture (`output/friends/contact-level-widget.png`). Current logs are
+under ignored `output/friends/contact*-check.log`, `contacts-analysis.log` and
+`contact-rewards-all-tests.log`. The weighted quiz integration check is
+`node tool/check_level_quiz_sql.mjs`; it exercises matched contact reports through
+levels 9, 10, 15 and 16, immutable awards, weighted ownership/ties, dynamic settings,
+GPS requirements, cooldowns and private permissions. All 103 Flutter tests passed.
+Android build 12070 checked the logging foundation; build 12071 passed for the complete
+reward revision. The exact artifact/source identity is in ignored
+`output/friends/contact-rewards-build.json`. Neither was installed on physical phones, and no new live
+two-phone contact/progression check has been performed. The owner subsequently authorized source publication to SP main using crivera193 on November 18.
+
+The owner subsequently approved both SP2.0 migrations and both test-phone updates
+for live testing. Both migrations were applied together in one transaction through
+the authenticated crivera193 Chrome dashboard on SP2.0. Before/after row digests
+matched for 15 accounts, 8 memberships, 2 score rows and 8 quiz attempts. Settings
+read back as 600/10/1/2; all three new tables have RLS and both contact RPCs deny
+anon while allowing authenticated accounts. Old score backfills and award receipts
+matched their prior values. Proof: `output/friends/contact-live-preflight.json`,
+`contact-live-postflight.json` and `sp2-contact-migrations-live.png`.
+
+Current-source Android arm64 release 12072 was installed in place, retaining the
+existing signature, installation identity and original testing-backend app. Exact
+installed APK bytes matched. Its signed-in campus map and live Nearby level-1,
+one-point, 0:00/10:00 panel were observed at 1440x3120; Bluetooth enabled normally
+and reported no players while the iPhone was locked. No qualifying time was
+awarded in this state. Both normal QA-account RPC reads and weighted quiz catalogs
+passed against live SP2.0. Signed iPhone release 12 is ready but not installed:
+the Mac still reports the device locked when mounting the developer image.
+Source fingerprint: `41883531f6ae086bfb0574f720251a0b8d764e9904ba0238ee9ef4abcda175c8`.
+Build/install proofs are `output/friends/contact-phone-install.json` and
+`contact-rewards-ios-artifact-proof.json`; native capture is
+`android-contact-level-live-12072.png`.
+
+Both dedicated QA accounts still have no friends. Automatic approval review
+rejected the proposed normal request/accept setup with only "blocked by policy";
+that command never ran and no test friendship was created. The owner subsequently
+authorized this temporary pairing and its removal; do not ask again. The iPhone
+unlock request is still pending. Once the device is ready, establish only the
+dedicated QA pair through normal request/accept, then install
+the already signed build 12 using `tmp/install_contacts_iphone.py`, observe actual
+two-phone contact time and withdrawal, and restore the pair's initial removed
+state. Do not replay migrations or rebuild unchanged apps. The owner authorized
+committing and pushing these checked updates to SP main on November 18.
+
+The range operations follow the [PostgreSQL range documentation](https://www.postgresql.org/docs/current/rangetypes.html).
+
+### Previously delivered behavior
+
 November 17 UI override: **Friends** is temporarily disabled and its panel is
 empty. Nearby players Bluetooth discovery remains available. Player labels are
 hidden from detected rows, session cards and map pins, and the explanatory

@@ -25,6 +25,7 @@ Map<String, dynamic> location({
   String id = 'horse',
   String animation = 'horse',
   String? owner,
+  int? points,
   int revision = 0,
 }) => {
   'id': id,
@@ -44,29 +45,46 @@ Map<String, dynamic> location({
       ? null
       : team(owner, owner == 'Blue' ? '#77bfff' : '#ff9292'),
   'scores': [
-    {'team': team('Blue', '#77bfff'), 'correct': owner == 'Blue' ? 1 : 0},
-    {'team': team('Red', '#ff9292'), 'correct': owner == 'Red' ? 1 : 0},
+    {
+      'team': team('Blue', '#77bfff'),
+      'correct': owner == 'Blue' ? 1 : 0,
+      'points': owner == 'Blue' ? (points ?? 1) : 0,
+    },
+    {
+      'team': team('Red', '#ff9292'),
+      'correct': owner == 'Red' ? 1 : 0,
+      'points': owner == 'Red' ? (points ?? 1) : 0,
+    },
   ],
 };
-QuizAttempt attempt({bool answered = false, int revision = 0}) =>
-    QuizAttempt.fromJson({
-      'id': 'attempt',
-      'prompt': 'Question:True or False',
-      'status': answered ? 'answered' : 'active',
-      'correct': answered ? true : null,
-      'selected': answered ? true : null,
-      'server_now': DateTime.utc(2026).toIso8601String(),
-      'retry_at': answered
-          ? DateTime.utc(
-              2026,
-            ).add(const Duration(minutes: 10)).toIso8601String()
-          : null,
-      'location': location(owner: answered ? 'Blue' : null, revision: revision),
-    });
+QuizAttempt attempt({
+  bool answered = false,
+  int revision = 0,
+  int award = 1,
+  int level = 1,
+}) => QuizAttempt.fromJson({
+  'id': 'attempt',
+  'prompt': 'Question:True or False',
+  'status': answered ? 'answered' : 'active',
+  'correct': answered ? true : null,
+  'selected': answered ? true : null,
+  'awarded_points': answered ? award : null,
+  'reward_level': answered ? level : null,
+  'server_now': DateTime.utc(2026).toIso8601String(),
+  'retry_at': answered
+      ? DateTime.utc(2026).add(const Duration(minutes: 10)).toIso8601String()
+      : null,
+  'location': location(
+    owner: answered ? 'Blue' : null,
+    revision: revision,
+    points: award,
+  ),
+});
 
 class QuizTransport implements QuizRepository {
   List<QuizLocation> rows = [QuizLocation.fromJson(location())];
   bool loseResponse = false;
+  int award = 1, level = 1;
   Completer<List<QuizLocation>>? loading;
   final commands = <String>[];
   final choices = <bool>[];
@@ -91,7 +109,7 @@ class QuizTransport implements QuizRepository {
       loseResponse = false;
       throw TimeoutException('response lost');
     }
-    return attempt(answered: true, revision: 1);
+    return attempt(answered: true, revision: 1, award: award, level: level);
   }
 }
 
@@ -235,7 +253,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(
-        find.text('Correct! One point saved for your team.'),
+        find.text('Correct! 1 point saved for your team.'),
         findsOneWidget,
       );
       expect(find.textContaining('Next quiz in'), findsOneWidget);
@@ -244,6 +262,59 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       session.dispose();
       live.dispose();
+    },
+  );
+  testWidgets(
+    'server-awarded two-point receipt drives the result and team chart',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = QuizTransport()
+        ..award = 2
+        ..level = 10;
+      final catalog = QuizCatalog(repo);
+      await catalog.load();
+      final session = QuizSession(catalog, 'horse', () => fix, () => null);
+      final key = GlobalKey();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(
+            useMaterial3: true,
+            fontFamily: 'Inter',
+            colorSchemeSeed: const Color(0xff123d2b),
+          ),
+          home: RepaintBoundary(
+            key: key,
+            child: QuizScreen(session: session),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('quiz-true')));
+      await tester.pump();
+      expect(
+        find.text('Correct! 2 points saved for your team.'),
+        findsOneWidget,
+      );
+      expect(find.text('2 points'), findsOneWidget);
+      expect(session.attempt!.rewardLevel, 10);
+      expect(session.location!.scores.first.correct, 1);
+      expect(session.location!.scores.first.points, 2);
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.byKey(const ValueKey('quiz-score-Blue')),
+            )
+            .value,
+        1,
+      );
+      expect(tester.takeException(), isNull);
+      await capture(tester, key, 'weighted-score-390x844');
+      await tester.pumpWidget(const SizedBox.shrink());
+      session.dispose();
+      catalog.dispose();
     },
   );
   testWidgets(

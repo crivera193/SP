@@ -6,6 +6,7 @@ import 'nearby_widgets.dart';
 import 'offline_friend_repository.dart';
 import 'offline_nearby_repository.dart';
 import 'verified_friend_book.dart';
+import 'contact_log.dart';
 
 /// Opens only Bluetooth from an account's saved credentials. It has no online
 /// client and cannot unlock the normal team/game routes when their checks fail.
@@ -19,11 +20,13 @@ class OfflineNearbyEntry extends StatefulWidget {
 class _OfflineNearbyEntryState extends State<OfflineNearbyEntry> {
   late final VerifiedFriendBook _book;
   late final NearbyController _nearby;
+  late final ContactLog _contacts;
   bool _loaded = false;
   @override
   void initState() {
     super.initState();
     _book = VerifiedFriendBook(widget.account);
+    _contacts = ContactLog(widget.account);
     final local = OfflineNearbyRepository(_book);
     final radio = BleNearbyRadio(
       identity: () => _book.selfCode,
@@ -32,6 +35,7 @@ class _OfflineNearbyEntryState extends State<OfflineNearbyEntry> {
     _nearby = NearbyController(
       local,
       radio,
+      contacts: _contacts,
       friendRepository: OfflineFriendRepository(local),
       friendWire: radio.friendWire,
     );
@@ -41,6 +45,7 @@ class _OfflineNearbyEntryState extends State<OfflineNearbyEntry> {
   Future<void> _load() async {
     try {
       await _book.load();
+      await _contacts.load();
     } catch (_) {
       // An unavailable private cache cannot authorize a friend session.
     }
@@ -50,6 +55,7 @@ class _OfflineNearbyEntryState extends State<OfflineNearbyEntry> {
   @override
   void dispose() {
     _nearby.dispose();
+    _contacts.dispose();
     _book.dispose();
     super.dispose();
   }
