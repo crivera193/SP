@@ -103,9 +103,14 @@ class SupabaseQuizRepository implements QuizRepository {
     }
 
     check();
-    final value = await client
-        .rpc(name, params: params)
-        .timeout(const Duration(seconds: 20));
+    var request = client.rpc(name, params: params);
+    if (name == 'sp_quiz_catalog') {
+      request = request.setHeader(
+        'x-sp-quiz-animations',
+        QuizLocation.supportedAnimations.join(','),
+      );
+    }
+    final value = await request.timeout(const Duration(seconds: 20));
     check();
     return value;
   }

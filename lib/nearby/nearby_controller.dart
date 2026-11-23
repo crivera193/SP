@@ -5,6 +5,7 @@ import 'nearby_models.dart';
 import 'friend_controller.dart';
 import 'friend_protocol.dart';
 import 'contact_log.dart';
+import 'ble_nearby_radio.dart';
 
 /// Owns one account's discovery session. GPS can update position data, never peers.
 class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
@@ -38,6 +39,9 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
   final bool observeLifecycle;
   final FriendController? friends;
   final ContactLog? contacts;
+  BleNearbyRadio? get hats =>
+      radio is BleNearbyRadio ? radio as BleNearbyRadio : null;
+  void hatStateChanged() => _notify();
   bool enabled = false, busy = false, running = false;
   bool _active = true, _disposed = false;
   int? _pollingEpoch;
@@ -72,7 +76,7 @@ class NearbyController extends ChangeNotifier with WidgetsBindingObserver {
           ? 'Nearby players unavailable'
           : _peers.isEmpty
           ? 'Bluetooth on · no players detected'
-          : '${_peers.length} nearby · ${peers.where((p) => p.position != null).length} on map');
+          : '${_peers.length} nearby');
 
   Future<void> enable() {
     if (_disposed || busy || running) return Future.value();

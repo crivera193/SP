@@ -187,7 +187,7 @@ void main() {
       );
       await controller.enable();
       expect(controller.peers.single.position, null);
-      expect(controller.status, contains('0 on map'));
+      expect(controller.status, '1 nearby');
       controller.dispose();
     },
   );

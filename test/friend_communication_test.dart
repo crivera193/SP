@@ -1,14 +1,11 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:ui' as ui;
+import 'dart:typed_data';
 import 'package:campus_app/nearby/friend_controller.dart';
 import 'package:campus_app/nearby/friend_protocol.dart';
 import 'package:campus_app/nearby/nearby_controller.dart';
 import 'package:campus_app/nearby/nearby_models.dart';
 import 'package:campus_app/nearby/nearby_widgets.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'nearby_players_test.dart' as discovery;
 
@@ -305,7 +302,7 @@ void main() {
     },
   );
   testWidgets(
-    'nearby UI locks nonfriends and offers session controls without chat',
+    'Nearby shows detected players without exposing friendship controls',
     (tester) async {
       final repository = UiNearbyRepository();
       final now = DateTime.now();
@@ -333,87 +330,20 @@ void main() {
         friendWire: wireA,
       );
       addTearDown(controller.dispose);
-      tester.view.physicalSize = const Size(1080, 2200);
-      tester.view.devicePixelRatio = 3;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final key = GlobalKey();
-      await tester.runAsync(() async {
-        await (FontLoader(
-          'Inter',
-        )..addFont(rootBundle.load('assets/fonts/Inter-Variable.ttf'))).load();
-        await (FontLoader(
-          'MaterialIcons',
-        )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
-      });
+      await tester.runAsync(controller.enable);
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData(
-            useMaterial3: true,
-            fontFamily: 'Inter',
-            colorSchemeSeed: const Color(0xff123d2b),
-          ),
-          home: Scaffold(
-            body: RepaintBoundary(
-              key: key,
-              child: ColoredBox(
-                color: const Color(0xfff8faf6),
-                child: NearbyPanel(controller: controller),
-              ),
-            ),
-          ),
+          home: Scaffold(body: NearbyPanel(controller: controller)),
         ),
       );
-      await tester.runAsync(controller.enable);
-      await tester.pumpAndSettle();
-      expect(find.text('Detected · communication locked'), findsOneWidget);
-      expect(find.byTooltip('Open Bluetooth session'), findsOneWidget);
+      expect(find.text('Player detected'), findsNWidgets(2));
       expect(find.text('Player nearby'), findsNothing);
       expect(find.text('Player B'), findsNothing);
-      Future<void> capture(String name) async {
-        await tester.runAsync(() async {
-          final image =
-              await (key.currentContext!.findRenderObject()
-                      as RenderRepaintBoundary)
-                  .toImage(pixelRatio: 3);
-          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-          final file = File('output/friends/$name.png');
-          await file.parent.create(recursive: true);
-          await file.writeAsBytes(bytes!.buffer.asUint8List());
-          image.dispose();
-        });
-      }
-
-      await capture('detected-players');
-      await tester.runAsync(() async {
-        await tester.tap(find.byTooltip('Open Bluetooth session'));
-        for (var i = 0; i < 100 && controller.friends!.busy; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 1));
-        }
-        await wireB.offer(channelId, 'central-a');
-        await pumpWire(wireA, wireB);
-      });
-      await tester.pumpAndSettle();
-      expect(find.text('Verified Bluetooth session'), findsOneWidget);
-      expect(find.text('Player B'), findsNothing);
+      expect(find.byTooltip('Open Bluetooth session'), findsNothing);
+      expect(find.byTooltip('Copy friend code'), findsNothing);
+      expect(find.text('Retry friend verification'), findsNothing);
       expect(find.byType(TextField), findsNothing);
       expect(find.text('Send'), findsNothing);
-      expect(tester.takeException(), isNull);
-      await capture('verified-nearby-panel');
-      await tester.ensureVisible(find.byTooltip('Close Bluetooth session'));
-      await tester.runAsync(() async {
-        await tester.tap(find.byTooltip('Close Bluetooth session'));
-        for (
-          var i = 0;
-          i < 100 && controller.friends!.conversations.isNotEmpty;
-          i++
-        ) {
-          await Future<void>.delayed(const Duration(milliseconds: 1));
-        }
-      });
-      await tester.pumpAndSettle();
-      expect(controller.friends!.conversations, isEmpty);
-      expect(find.byTooltip('Open Bluetooth session'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(
         const MaterialApp(home: Scaffold(body: NearbyPlayerMarker())),

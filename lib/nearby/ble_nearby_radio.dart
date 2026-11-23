@@ -1,127 +1,108 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-import 'package:geolocator/geolocator.dart' as gps;
-import 'nearby_models.dart';
-import 'friend_protocol.dart';
 
-/// Android/iOS share an app-only service UUID and two baseline ATT characteristics.
-/// Each value is exactly 16 bytes, below the baseline 20-byte write payload.
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart' as gps;
+import 'package:nearby/nearby.dart';
+import 'package:universal_ble/universal_ble.dart';
+
+import 'friend_protocol.dart';
+import 'hat_tip.dart';
+import 'nearby_models.dart';
+
+const _serviceId = 'sp-nearby-v3';
+const _sharedRangeFreshness = Duration(seconds: 3);
+const _androidRssi = MethodChannel('com.example.campus_app/nearby_rssi');
+final _uuid = RegExp(r'^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$');
+
+/// Keeps the SP encounter and encrypted friend protocol on a single BLE radio.
 class BleNearbyRadio implements NearbyRadio {
-  BleNearbyRadio({this.identity, this.onIdentity})
-    : _service = UUID.fromString(
-        identity == null
-            ? NearbyProtocol.service
-            : NearbyProtocol.offlineService,
-      );
-  final String? Function()? identity;
-  final void Function(String peerSession, String code)? onIdentity;
+  BleNearbyRadio({
+    required this.identity,
+    required this.onIdentity,
+    required this.teams,
+    required this.onChanged,
+    NearbyService Function()? createService,
+  }) : _createService = createService ?? _newService;
+
+  static NearbyService _newService() =>
+      NearbyService(localDisplayName: 'SP Vaquero');
+
+  final String? Function() identity;
+  final void Function(String peerSession, String code) onIdentity;
+  final HatTipTeams teams;
+  final VoidCallback onChanged;
+  final NearbyService Function() _createService;
   final friendWire = FriendWire();
-  final UUID _service;
-  final _identityId = UUID.fromString(NearbyProtocol.identity);
-  final _centralCodes = <UUID, String>{};
-  final _centralSessions = <UUID, String>{};
-  final _sessionId = UUID.fromString(NearbyProtocol.session);
-  final _challengeId = UUID.fromString(NearbyProtocol.challenge);
-  final _friendChannelId = UUID.fromString(NearbyProtocol.friendChannel);
-  final _friendDataId = UUID.fromString(NearbyProtocol.friendData);
-  CentralManager? _central;
-  PeripheralManager? _peripheral;
-  final List<StreamSubscription<dynamic>> _subscriptions = [];
-  final Map<UUID, Peripheral> _known = {};
-  final Map<UUID, DateTime> _attempted = {};
-  Future<void> _nativeTail = Future.value();
-  Future<void>? _exchangeWork;
-  Peripheral? _connecting;
-  Timer? _scanTimer, _exchangeTimer;
-  int _epoch = 0;
-  bool _active = false;
-  String? _token;
+
+  final _devices = <String, _Device>{};
+  final _connections = <String, _Connection>{};
+  final _initiated = <String>{};
+  final _subscriptions = <StreamSubscription<dynamic>>[];
+  final _tips = <String, String>{};
+  final _seen = <(String, String)>{};
+  List<(String, String)> _visibleTargets = const [];
+  NearbyService? _service;
+  int _generation = 0;
+  Timer? _timer;
+  Future<void> _stopWork = Future.value();
+  Future<void>? _startupWork, _connectionWork;
+  DateTime? _startedAt;
   NearbyConfig? _config;
+  String? _session;
   Future<String?> Function(String)? _challenge;
   Future<void> Function(String)? _confirm;
-  void Function(String)? _failure;
+  String? _connectingDevice;
+  String? status, greeting, replyTo;
 
-  Future<void> _native(Future<void> Function() body) {
-    final next = _nativeTail.then((_) => body());
-    _nativeTail = next.catchError((Object _) {});
-    return next;
+  List<HatTipTarget> get targets => [
+    for (final link in _connections.values)
+      if (_target(link) case final HatTipTarget target) target,
+  ];
+  bool hasHatTipTeam(String session) => _connections.values.any(
+    (link) => link.session == session && teams.colors.containsKey(link.team),
+  );
+
+  HatTipTarget? _target(_Connection link) {
+    final session = link.session;
+    final color = teams.colors[link.team];
+    final scan =
+        _devices[link.device] ??
+        _devices.values
+            .where((device) => device.peer.id == link.id)
+            .firstOrNull;
+    final now = DateTime.now();
+    final sharedRange = link.sharedRange;
+    final close = switch (link.signal.median(now)) {
+      final int strength => strength >= HatTipSignal.minimumDbm,
+      _
+          when sharedRange != null &&
+              now.difference(sharedRange.receivedAt) < _sharedRangeFreshness =>
+        sharedRange.close,
+      _ => scan?.signal.isClose(now) ?? false,
+    };
+    if (session == null || color == null || !close) {
+      return null;
+    }
+    return HatTipTarget(session, color);
   }
 
-  bool _current(int epoch) => _active && epoch == _epoch;
   @override
   Future<void> prepare() async {
-    final epoch = _epoch;
     if (!Platform.isAndroid && !Platform.isIOS) {
       throw StateError('Nearby players need an Android phone or iPhone.');
     }
-    if (Platform.isAndroid) {
-      // Android scan permission rules can require location permission. This does
-      // not read coordinates or make GPS a player-discovery signal.
-      var permission = await gps.Geolocator.checkPermission();
-      if (epoch != _epoch) return;
-      if (permission == gps.LocationPermission.denied) {
-        permission = await gps.Geolocator.requestPermission();
-      }
-      if (epoch != _epoch) return;
-      if (permission == gps.LocationPermission.denied ||
-          permission == gps.LocationPermission.deniedForever) {
-        throw StateError(
-          'Allow location access in Settings for Android scanning and map positions.',
-        );
-      }
-    }
-    _central ??= CentralManager();
-    _peripheral ??= PeripheralManager();
-    await _ready(_central!, epoch, authorize: Platform.isAndroid);
-    if (epoch != _epoch) return;
-    await _ready(_peripheral!, epoch, authorize: Platform.isAndroid);
-  }
-
-  Future<void> _ready(
-    BluetoothLowEnergyManager manager,
-    int epoch, {
-    bool authorize = false,
-  }) async {
-    var state = manager.state;
-    if (state == BluetoothLowEnergyState.unknown) {
-      state =
-          (await manager.stateChanged
-                  .firstWhere((e) => e.state != BluetoothLowEnergyState.unknown)
-                  .timeout(const Duration(seconds: 45)))
-              .state;
-    }
-    if (epoch != _epoch) return;
-    if (authorize && state == BluetoothLowEnergyState.unauthorized) {
-      final allowed = await manager.authorize();
-      if (epoch != _epoch) return;
-      if (!allowed) {
+    if (Platform.isAndroid && !await UniversalBle.hasPermissions()) {
+      await UniversalBle.requestPermissions();
+      if (!await UniversalBle.hasPermissions()) {
         throw StateError('Allow Nearby devices in Settings, then retry.');
       }
-      state = manager.state;
-      if (state == BluetoothLowEnergyState.unauthorized ||
-          state == BluetoothLowEnergyState.unknown) {
-        state =
-            (await manager.stateChanged
-                    .firstWhere(
-                      (e) =>
-                          e.state != BluetoothLowEnergyState.unknown &&
-                          e.state != BluetoothLowEnergyState.unauthorized,
-                    )
-                    .timeout(const Duration(seconds: 10)))
-                .state;
-      }
     }
-    if (epoch != _epoch) return;
-    if (state != BluetoothLowEnergyState.poweredOn) {
-      throw StateError(switch (state) {
-        BluetoothLowEnergyState.unsupported =>
-          'This device cannot advertise nearby players over Bluetooth.',
-        BluetoothLowEnergyState.unauthorized =>
-          'Allow Bluetooth access in Settings, then retry.',
-        _ => 'Turn on Bluetooth, then retry Nearby players.',
-      });
+    final state = await UniversalBle.getBluetoothAvailabilityState();
+    if (state == AvailabilityState.poweredOff) {
+      throw StateError('Turn on Bluetooth, then retry Nearby players.');
     }
   }
 
@@ -129,487 +110,485 @@ class BleNearbyRadio implements NearbyRadio {
   Future<void> start(
     String session,
     NearbyConfig config,
-    Future<String?> Function(String) challenge,
-    Future<void> Function(String) confirm,
-    void Function(String) onFailure,
+    Future<String?> Function(String peer) challenge,
+    Future<void> Function(String nonce) confirm,
+    void Function(String message) onFailure,
   ) async {
-    final nextEpoch = _epoch + 1;
+    final generation = _generation + 1;
     await stop();
-    if (_epoch != nextEpoch) return;
-    final epoch = _epoch;
-    final central = _central, peripheral = _peripheral;
-    if (central == null || peripheral == null) {
-      throw StateError('Bluetooth is not ready. Retry Nearby players.');
-    }
-    await _ready(central, epoch);
-    await _ready(peripheral, epoch);
-    if (_epoch != epoch) return;
-    _active = true;
-    _token = session;
+    if (_generation != generation) return;
+    final service = _createService();
+    _service = service;
+    _session = session;
     _config = config;
     _challenge = challenge;
     _confirm = confirm;
-    _failure = onFailure;
-    void state(BluetoothLowEnergyStateChangedEventArgs e) {
-      if (_current(epoch) && e.state != BluetoothLowEnergyState.poweredOn) {
-        _failure?.call(
-          'Bluetooth is unavailable. Check permissions and retry.',
-        );
-      }
-    }
-
-    _subscriptions.add(central.stateChanged.listen(state));
-    _subscriptions.add(peripheral.stateChanged.listen(state));
-    _subscriptions.add(
-      central.discovered.listen((e) {
-        if (!_current(epoch) ||
-            !e.advertisement.serviceUUIDs.contains(_service)) {
-          return;
-        }
-        if (_known.containsKey(e.peripheral.uuid) ||
-            _known.length < config.maxPeers) {
-          _known[e.peripheral.uuid] = e.peripheral;
-          unawaited(_exchange());
+    _startedAt = DateTime.now();
+    _subscriptions.addAll([
+      service.discoveredPeersStream.listen((peers) {
+        if (_service != service) return;
+        for (final peer in peers.where(_isBle)) {
+          _devices
+              .putIfAbsent(peer.bleDeviceId!, () => _Device(peer))
+              .update(peer);
         }
       }),
-    );
-    _subscriptions.add(
-      peripheral.characteristicReadRequested.listen(
-        (e) => unawaited(_read(e, epoch)),
+      service.peerStateStream.listen((event) {
+        if (_service != service || !_isBle(event.peer)) return;
+        switch (event.state) {
+          case PeerConnectionState.connected:
+            final device = event.peer.bleDeviceId!;
+            final link = _Connection(
+              event.peer.id,
+              device,
+              isCentral: _initiated.remove(device),
+            );
+            _connections[link.id] = link;
+            debugPrint(
+              'SP Nearby connected over BLE (${link.isCentral ? 'initiator' : 'acceptor'})',
+            );
+            unawaited(_exchange(service, link));
+          case PeerConnectionState.disconnected:
+            final link = _connections.remove(event.peer.id);
+            if (link != null) unawaited(_closeSignalClient(link));
+            onChanged();
+          default:
+            break;
+        }
+      }),
+      service.payloadReceivedStream.listen((payload) {
+        if (_service != service || payload.bytes == null) return;
+        final link = _connections[payload.peerId];
+        if (link == null ||
+            payload.bytes!.length > 1024 ||
+            link.incoming >= 8) {
+          return;
+        }
+        link.incoming++;
+        link.tail = link.tail
+            .then((_) => _receive(service, link, payload.bytes!))
+            .catchError((Object _) {})
+            .whenComplete(() => link.incoming--);
+      }),
+      UniversalBle.availabilityStream.listen((state) {
+        if (_service == service && state == AvailabilityState.poweredOff) {
+          onFailure('Turn on Bluetooth, then retry Nearby players.');
+        }
+      }),
+      UniversalBlePeripheral.advertisingStateStream.listen((event) {
+        if (_service == service &&
+            event.state == PeripheralAdvertisingState.error) {
+          debugPrint('SP Nearby BLE advertising error: ${event.error}');
+          onFailure('Nearby could not advertise over Bluetooth.');
+        }
+      }),
+    ]);
+    await (_startupWork = _startNative(service));
+  }
+
+  Future<void> _startNative(NearbyService service) async {
+    await service.startAdvertising(
+      options: const AdvertisingOptions(
+        serviceId: _serviceId,
+        strategy: DiscoveryStrategy.bleOnly,
       ),
     );
-    _subscriptions.add(
-      peripheral.characteristicWriteRequested.listen(
-        (e) => unawaited(_write(e, epoch)),
+    if (_service != service) return;
+    await service.startDiscovery(
+      options: const DiscoveryOptions(
+        serviceId: _serviceId,
+        strategy: DiscoveryStrategy.bleOnly,
       ),
     );
-    await _native(() async {
-      if (!_current(epoch)) return;
-      await peripheral.removeAllServices();
-      if (!_current(epoch)) return;
-      await peripheral.addService(
-        GATTService(
-          uuid: _service,
-          isPrimary: true,
-          includedServices: [],
-          characteristics: [
-            if (identity != null)
-              GATTCharacteristic.mutable(
-                uuid: _identityId,
-                properties: [
-                  GATTCharacteristicProperty.read,
-                  GATTCharacteristicProperty.write,
-                ],
-                permissions: [
-                  GATTCharacteristicPermission.read,
-                  GATTCharacteristicPermission.write,
-                ],
-                descriptors: [],
-              ),
-            GATTCharacteristic.mutable(
-              uuid: _sessionId,
-              properties: [GATTCharacteristicProperty.read],
-              permissions: [GATTCharacteristicPermission.read],
-              descriptors: [],
-            ),
-            GATTCharacteristic.mutable(
-              uuid: _challengeId,
-              properties: [GATTCharacteristicProperty.write],
-              permissions: [GATTCharacteristicPermission.write],
-              descriptors: [],
-            ),
-            GATTCharacteristic.mutable(
-              uuid: _friendChannelId,
-              properties: [GATTCharacteristicProperty.write],
-              permissions: [GATTCharacteristicPermission.write],
-              descriptors: [],
-            ),
-            GATTCharacteristic.mutable(
-              uuid: _friendDataId,
-              properties: [
-                GATTCharacteristicProperty.read,
-                GATTCharacteristicProperty.write,
-              ],
-              permissions: [
-                GATTCharacteristicPermission.read,
-                GATTCharacteristicPermission.write,
-              ],
-              descriptors: [],
-            ),
-          ],
-        ),
-      );
-      if (!_current(epoch)) return;
-      // Only the fixed service is advertised: no device name, GPS, email or JWT.
-      await peripheral.startAdvertising(
-        Advertisement(serviceUUIDs: [_service]),
-      );
-    });
-    if (!_current(epoch)) return;
-    await _scan(epoch);
-    if (!_current(epoch)) return;
-    _exchangeTimer = Timer.periodic(
-      config.heartbeat,
-      (_) => unawaited(_exchange()),
+    if (_service != service) return;
+    if (service.advertisingPort != null) {
+      throw StateError('Nearby opened a network listener.');
+    }
+    debugPrint('SP Nearby started BLE-only discovery and advertising');
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 400),
+      (_) => _tick(service),
     );
   }
 
-  Future<void> _scan(int epoch) async {
-    if (!_current(epoch)) return;
-    try {
-      await _native(() async {
-        if (_current(epoch)) {
-          await _central!.startDiscovery(serviceUUIDs: [_service]);
-        }
-      });
-      if (!_current(epoch)) return;
-      _scanTimer = Timer(_config!.scan, () async {
-        try {
-          await _native(() async {
-            if (_current(epoch)) await _central!.stopDiscovery();
-          });
-          if (_current(epoch)) {
-            _scanTimer = Timer(_config!.pause, () => unawaited(_scan(epoch)));
-          }
-        } catch (_) {
-          if (_current(epoch)) {
-            _failure?.call('Bluetooth scanning stopped. Retry Nearby players.');
-          }
-        }
-      });
-    } catch (_) {
-      if (_current(epoch)) {
-        _failure?.call('Bluetooth scanning failed. Retry Nearby players.');
-      }
-    }
-  }
+  bool _isBle(Peer peer) =>
+      peer.discoveredVia == DiscoveryMedium.ble &&
+      peer.bleDeviceId != null &&
+      peer.ipAddress == null &&
+      peer.port == null;
 
-  Future<void> _read(
-    GATTCharacteristicReadRequestedEventArgs e,
-    int epoch,
-  ) async {
-    final peripheral = _peripheral!;
-    try {
-      if (_current(epoch) &&
-          e.characteristic.uuid == _identityId &&
-          identity?.call() != null) {
-        final value = UUID.fromString(identity!()!).value;
-        if (e.request.offset < 0 || e.request.offset > value.length) {
-          await peripheral.respondReadRequestWithError(
-            e.request,
-            error: GATTError.invalidOffset,
-          );
-          return;
+  void _tick(NearbyService service) {
+    if (_service != service) return;
+    final now = DateTime.now();
+    final config = _config!;
+    _devices.removeWhere(
+      (_, scan) => now.difference(scan.peer.lastSeen) > config.encounter,
+    );
+    for (final link in _connections.values.toList()) {
+      if (now.difference(link.lastSeen) > config.encounter) {
+        _connections.remove(link.id);
+        unawaited(_closeSignalClient(link));
+        unawaited(service.disconnectPeer(link.id).catchError((Object _) {}));
+      } else {
+        unawaited(_exchange(service, link));
+        if ((link.isCentral ||
+                (Platform.isAndroid && teams.colors.containsKey(link.team))) &&
+            !link.readingSignal &&
+            now.difference(link.lastSignalRead) >= const Duration(seconds: 1)) {
+          unawaited(_readSignal(service, link, now));
         }
-        await peripheral.respondReadRequestWithValue(
-          e.request,
-          value: Uint8List.fromList(value.sublist(e.request.offset)),
-        );
-        return;
-      }
-      if (_current(epoch) &&
-          e.characteristic.uuid == _friendDataId &&
-          e.request.offset == 0) {
-        await peripheral.respondReadRequestWithValue(
-          e.request,
-          value: friendWire.read(e.central.uuid.toString()),
-        );
-        return;
-      }
-      if (!_current(epoch) ||
-          e.characteristic.uuid != _sessionId ||
-          _token == null) {
-        await peripheral.respondReadRequestWithError(
-          e.request,
-          error: GATTError.readNotPermitted,
-        );
-        return;
-      }
-      final bytes = UUID.fromString(_token!).value;
-      if (e.request.offset < 0 || e.request.offset > bytes.length) {
-        await peripheral.respondReadRequestWithError(
-          e.request,
-          error: GATTError.invalidOffset,
-        );
-        return;
-      }
-      await peripheral.respondReadRequestWithValue(
-        e.request,
-        value: Uint8List.fromList(bytes.sublist(e.request.offset)),
-      );
-    } catch (_) {
-      /* Disconnects cannot create encounters. */
-    }
-  }
-
-  Future<void> _write(
-    GATTCharacteristicWriteRequestedEventArgs e,
-    int epoch,
-  ) async {
-    try {
-      if (_current(epoch) && e.request.offset == 0) {
-        if (e.characteristic.uuid == _identityId &&
-            e.request.value.length == 16 &&
-            identity != null) {
-          if (_centralCodes.length < 64 ||
-              _centralCodes.containsKey(e.central.uuid)) {
-            _centralCodes[e.central.uuid] = UUID(e.request.value).toString();
-          }
-          await _peripheral!.respondWriteRequest(e.request);
-          return;
-        }
-        if (e.characteristic.uuid == _friendChannelId &&
-            e.request.value.length == 16) {
-          // A transport ACK is not authorization. Only the independent server
-          // check can bind a mailbox, and only encrypted key proof makes it ready.
-          await _peripheral!.respondWriteRequest(e.request);
-          if (_current(epoch)) {
-            unawaited(
-              friendWire
-                  .offer(
-                    UUID(e.request.value).toString(),
-                    e.central.uuid.toString(),
-                    peerToken: _centralSessions[e.central.uuid],
-                  )
-                  .catchError((Object _) => false),
-            );
-          }
-          return;
-        }
-        if (e.characteristic.uuid == _friendDataId &&
-            e.request.value.length >= 7 &&
-            e.request.value.length <= 20) {
-          await _peripheral!.respondWriteRequest(e.request);
-          if (_current(epoch)) {
-            unawaited(
-              friendWire
-                  .receiveFrom(e.central.uuid.toString(), e.request.value)
-                  .catchError((Object _) {}),
-            );
-          }
-          return;
-        }
-      }
-      if (!_current(epoch) ||
-          e.characteristic.uuid != _challengeId ||
-          e.request.offset != 0 ||
-          e.request.value.length != 16) {
-        await _peripheral!.respondWriteRequestWithError(
-          e.request,
-          error: GATTError.invalidAttributeValueLength,
-        );
-        return;
-      }
-      final nonce = UUID(e.request.value).toString();
-      if (identity != null) {
-        final code = _centralCodes[e.central.uuid];
-        if (code == null) return;
-        _centralSessions[e.central.uuid] = nonce;
-        onIdentity?.call(nonce, code);
-      }
-      await _peripheral!.respondWriteRequest(e.request);
-      if (_current(epoch)) unawaited(_confirm!(nonce));
-    } catch (_) {
-      /* Incomplete requests cannot create encounters. */
-    }
-  }
-
-  Future<void> _exchange() =>
-      _exchangeWork ??= _exchangeNow().whenComplete(() => _exchangeWork = null);
-  Future<void> _exchangeNow() async {
-    if (!_active) return;
-    final epoch = _epoch;
-    // One outgoing link at a time, in fair oldest-attempt order. Incoming GATT
-    // writes remain independent, so one link establishes a bilateral encounter.
-    final peers = _known.values.toList()
-      ..sort(
-        (a, b) => (_attempted[a.uuid] ?? DateTime.fromMillisecondsSinceEpoch(0))
-            .compareTo(
-              _attempted[b.uuid] ?? DateTime.fromMillisecondsSinceEpoch(0),
-            ),
-      );
-    for (final peer in peers) {
-      if (!_current(epoch)) return;
-      final previous = _attempted[peer.uuid];
-      if (previous != null &&
-          DateTime.now().difference(previous) < _config!.heartbeat) {
-        continue;
-      }
-      _attempted[peer.uuid] = DateTime.now();
-      _connecting = peer;
-      try {
-        await _central!.connect(peer).timeout(const Duration(seconds: 4));
-        if (!_current(epoch)) return;
-        final services = await _central!
-            .discoverGATT(peer)
-            .timeout(const Duration(seconds: 4));
-        if (!_current(epoch)) return;
-        final characteristics = services
-            .where((s) => s.uuid == _service)
-            .expand((s) => s.characteristics)
-            .toList();
-        final source = characteristics.firstWhere((c) => c.uuid == _sessionId);
-        final destination = characteristics.firstWhere(
-          (c) => c.uuid == _challengeId,
-        );
-        final bytes = await _central!
-            .readCharacteristic(peer, source)
-            .timeout(const Duration(seconds: 3));
-        if (!_current(epoch) || bytes.length != 16) continue;
-        final token = UUID(bytes).toString();
-        if (token == _token) continue;
-        if (identity != null) {
-          final characteristic = characteristics
-              .where((c) => c.uuid == _identityId)
-              .firstOrNull;
-          final ownCode = identity!();
-          if (characteristic == null || ownCode == null) continue;
-          final code = await _central!
-              .readCharacteristic(peer, characteristic)
-              .timeout(const Duration(seconds: 3));
-          if (!_current(epoch) || code.length != 16) continue;
-          onIdentity?.call(token, UUID(code).toString());
-          await _central!
-              .writeCharacteristic(
-                peer,
-                characteristic,
-                value: Uint8List.fromList(UUID.fromString(ownCode).value),
-                type: GATTCharacteristicWriteType.withResponse,
-              )
-              .timeout(const Duration(seconds: 3));
-          if (!_current(epoch)) return;
-        }
-        final nonce = await _challenge!(token);
-        if (!_current(epoch) || nonce == null) continue;
-        await _central!
-            .writeCharacteristic(
-              peer,
-              destination,
-              value: Uint8List.fromList(UUID.fromString(nonce).value),
-              type: GATTCharacteristicWriteType.withResponse,
-            )
-            .timeout(const Duration(seconds: 3));
-        if (_current(epoch)) {
-          await _exchangeFriend(peer, token, characteristics, epoch);
-        }
-      } catch (_) {
-        _known.remove(peer.uuid);
-        _attempted.remove(peer.uuid);
-      } finally {
-        try {
-          await _central!.disconnect(peer).timeout(const Duration(seconds: 2));
-        } catch (_) {
-          /* Already disconnected. */
-        }
-        _connecting = null;
       }
     }
-  }
-
-  Future<void> _exchangeFriend(
-    Peripheral peer,
-    String token,
-    List<GATTCharacteristic> characteristics,
-    int epoch,
-  ) async {
-    final id = friendWire.channelFor(token);
-    if (id == null) return;
-    GATTCharacteristic? control, data;
-    for (final c in characteristics) {
-      if (c.uuid == _friendChannelId) control = c;
-      if (c.uuid == _friendDataId) data = c;
-    }
-    if (control == null || data == null) {
-      return; // older peers remain detectable
-    }
-    try {
-      await _central!
-          .writeCharacteristic(
-            peer,
-            control,
-            value: Uint8List.fromList(UUID.fromString(id).value),
-            type: GATTCharacteristicWriteType.withResponse,
+    // Give Android the first opportunity to connect across platforms.
+    if (_connectingDevice == null &&
+        _connections.length < config.maxPeers &&
+        now.difference(_startedAt!) >
+            Duration(seconds: Platform.isIOS ? 5 : 1)) {
+      final candidate = _devices.values
+          .where(
+            (scan) =>
+                now.difference(scan.attemptedAt) >= config.heartbeat &&
+                !_connections.values.any(
+                  (link) =>
+                      link.device == scan.peer.bleDeviceId ||
+                      link.id == scan.peer.id,
+                ),
           )
-          .timeout(const Duration(seconds: 3));
-      final watch = Stopwatch()..start();
-      for (
-        var i = 0;
-        i < 64 && watch.elapsed < const Duration(seconds: 3);
-        i++
-      ) {
-        if (!_current(epoch) || friendWire.channelFor(token) != id) return;
-        final outgoing = friendWire.next(id);
-        if (outgoing.isNotEmpty) {
-          await _central!
-              .writeCharacteristic(
-                peer,
-                data,
-                value: outgoing,
-                type: GATTCharacteristicWriteType.withResponse,
-              )
-              .timeout(const Duration(seconds: 3));
-        }
-        if (!_current(epoch)) return;
-        final incoming = await _central!
-            .readCharacteristic(peer, data)
-            .timeout(const Duration(seconds: 3));
-        if (!_current(epoch)) return;
-        if (incoming.isNotEmpty) await friendWire.receive(id, incoming);
-        if (outgoing.isEmpty && incoming.isEmpty) break;
+          .firstOrNull;
+      if (candidate != null) {
+        candidate.attemptedAt = now;
+        _connectingDevice = candidate.peer.bleDeviceId;
+        _initiated.add(_connectingDevice!);
+        _connectionWork = _connect(service, candidate.peer);
       }
+    }
+    final visible = targets
+        .map((target) => (target.session, target.colorName))
+        .toList();
+    if (!listEquals(_visibleTargets, visible)) {
+      _visibleTargets = visible;
+      onChanged();
+    }
+  }
+
+  Future<void> _connect(NearbyService service, Peer peer) async {
+    var connected = false;
+    try {
+      connected = await service.requestConnection(
+        peer,
+        timeout: const Duration(seconds: 10),
+      );
+    } catch (error) {
+      // A lost advertisement or simultaneous connection will be retried.
+      debugPrint('SP Nearby BLE connection failed: ${error.runtimeType}');
+    } finally {
+      if (_service == service) {
+        if (!connected) _initiated.remove(peer.bleDeviceId);
+        _connectingDevice = null;
+      }
+    }
+  }
+
+  Future<void> _readSignal(
+    NearbyService service,
+    _Connection link,
+    DateTime started,
+  ) async {
+    link.readingSignal = true;
+    link.lastSignalRead = started;
+    try {
+      final strength = link.isCentral
+          ? await UniversalBle.readRssi(
+              link.device,
+              timeout: const Duration(seconds: 2),
+            )
+          : await _androidRssi.invokeMethod<int>('read', link.device);
+      if (strength == null && !link.reportedMissingSignal) {
+        link.reportedMissingSignal = true;
+        debugPrint('SP Nearby Android did not return an RSSI sample');
+      }
+      if (_service == service &&
+          _connections[link.id] == link &&
+          strength != null &&
+          strength < 0 &&
+          strength >= -127) {
+        final now = DateTime.now();
+        link.signal.observe(now, strength);
+        final median = link.signal.median(now);
+        if (median == null) return;
+        final close = median >= HatTipSignal.minimumDbm;
+        if (!link.isCentral && link.lastSignalClose != close) {
+          link.lastSignalClose = close;
+          debugPrint(
+            'SP Nearby Android received-link BLE range: ${close ? 'close' : 'out of range'} ($median dBm)',
+          );
+        }
+        // The BLE initiator can read RSSI for this link. The accepting phone
+        // may no longer receive advertisements from it while connected.
+        if (link.isCentral && link.session != null) {
+          await _send(service, link, {'type': 'hat_range', 'close': close});
+        }
+      }
+    } catch (error) {
+      // A phone can still supply valid advertisement samples.
+      if (!link.reportedMissingSignal) {
+        link.reportedMissingSignal = true;
+        debugPrint('SP Nearby BLE RSSI read failed: ${error.runtimeType}');
+      }
+    } finally {
+      link.readingSignal = false;
+    }
+  }
+
+  Future<void> _closeSignalClient(_Connection link) async {
+    if (Platform.isAndroid && !link.isCentral) {
+      await _androidRssi
+          .invokeMethod<void>('close', link.device)
+          .catchError((Object _) {});
+    }
+  }
+
+  Future<void> _exchange(NearbyService service, _Connection link) async {
+    if (_service != service || link.sending) return;
+    final now = DateTime.now();
+    final config = _config!;
+    link.sending = true;
+    try {
+      if (now.difference(link.lastHello) >= config.heartbeat) {
+        final code = identity();
+        if (code != null) {
+          link.lastHello = now;
+          await _send(service, link, {
+            'type': 'hello',
+            'session': _session,
+            'identity': code,
+            'team': teams.ownTeamId,
+          });
+        }
+      }
+      if (_service != service) return;
+      final session = link.session;
+      final channel = session == null ? null : friendWire.channelFor(session);
+      if (channel == null) return;
+      final frames = [
+        for (var i = 0; i < 8; i++)
+          if (friendWire.next(channel) case final frame when frame.isNotEmpty)
+            base64Encode(frame),
+      ];
+      if (frames.isNotEmpty) {
+        await _send(service, link, {
+          'type': 'friend',
+          'channel': channel,
+          'frames': frames,
+        });
+      }
+    } finally {
+      link.sending = false;
+    }
+  }
+
+  Future<bool> _send(
+    NearbyService service,
+    _Connection link,
+    Map<String, Object?> message,
+  ) async {
+    if (_service != service || _connections[link.id] != link) return false;
+    try {
+      await service.sendBytes(
+        link.id,
+        Uint8List.fromList(utf8.encode(jsonEncode(message))),
+      );
+      return true;
     } catch (_) {
-      // Radio loss never upgrades authorization or delivers plaintext. Retained
-      // encrypted packets retry until authenticated ACK or authorization expiry.
+      return false;
+    }
+  }
+
+  Future<void> _receive(
+    NearbyService service,
+    _Connection link,
+    Uint8List bytes,
+  ) async {
+    if (_service != service || _connections[link.id] != link) return;
+    final data = jsonDecode(utf8.decode(bytes));
+    if (data is! Map<String, dynamic>) return;
+    if (data case {
+      'type': 'hello',
+      'session': final String session,
+      'identity': final String code,
+    }) {
+      if (!_uuid.hasMatch(session) ||
+          !_uuid.hasMatch(code) ||
+          session == _session ||
+          code == identity() ||
+          (link.session != null &&
+              (link.session != session || link.identity != code))) {
+        return;
+      }
+      link.session = session;
+      link.identity = code;
+      final team = data['team'];
+      link.team = team is String && team.length <= 40 ? team : null;
+      link.lastSeen = DateTime.now();
+      onIdentity(session, code);
+      await _challenge?.call(session);
+      if (_service == service) await _confirm?.call(session);
+      return;
+    }
+    final session = link.session;
+    if (session == null ||
+        DateTime.now().difference(link.lastSeen) > _config!.encounter) {
+      return;
+    }
+    if (data case {'type': 'hat_range', 'close': final bool close}) {
+      if (!link.isCentral) {
+        if (link.sharedRange?.close != close) {
+          debugPrint(
+            'SP Nearby received a BLE range update: ${close ? 'close' : 'out of range'}',
+          );
+        }
+        link.sharedRange = (receivedAt: DateTime.now(), close: close);
+      }
+      return;
+    }
+    if (data case {
+      'type': 'friend',
+      'channel': final String id,
+      'frames': final List frames,
+    }) {
+      if (!_uuid.hasMatch(id) || frames.isEmpty || frames.length > 8) return;
+      if (friendWire.channelFor(session) != id &&
+          !await friendWire.offer(id, link.id, peerToken: session)) {
+        return;
+      }
+      if (friendWire.channelFor(session) != id) return;
+      for (final frame in frames) {
+        if (_service != service) return;
+        if (frame is String && frame.length <= 28) {
+          await friendWire.receive(id, base64Decode(frame));
+        }
+      }
+      return;
+    }
+    final id = data['id'];
+    if (id is! String || !_uuid.hasMatch(id)) return;
+    if (data['type'] == 'hat_receipt' && _tips[id] == link.id) {
+      _tips.remove(id);
+      status = 'Hat tip delivered';
+      debugPrint('SP Nearby received a hat-tip receipt over BLE');
+      onChanged();
+    }
+    if (data['type'] == 'hat_tip') {
+      final key = (session, id);
+      if (!_seen.contains(key)) {
+        if (_seen.length >= 64) _seen.remove(_seen.first);
+        _seen.add(key);
+        greeting = '🤠 Howdy, partner! From a nearby player.';
+        replyTo = session;
+        debugPrint('SP Nearby handled a hat tip over BLE');
+        onChanged();
+      }
+      await _send(service, link, {'type': 'hat_receipt', 'id': id});
+    }
+  }
+
+  Future<void> tip(String session) async {
+    final service = _service;
+    final link = _connections.values
+        .where((item) => item.session == session)
+        .firstOrNull;
+    if (service == null || link == null || _target(link) == null) {
+      status = 'Couldn’t confirm delivery.';
+      onChanged();
+      return;
+    }
+    if (_tips.containsValue(link.id)) return;
+    final id = NearbyProtocol.randomId();
+    _tips[id] = link.id;
+    status = 'Sending hat tip…';
+    onChanged();
+    if (await _send(service, link, {'type': 'hat_tip', 'id': id})) {
+      await Future<void>.delayed(const Duration(seconds: 5));
+    }
+    if (_service == service && _tips.remove(id) != null) {
+      status = 'Couldn’t confirm delivery.';
+      onChanged();
     }
   }
 
   @override
-  Future<void> stop() async {
-    _active = false;
-    _epoch++;
-    _token = null;
-    _scanTimer?.cancel();
-    _exchangeTimer?.cancel();
-    _known.clear();
-    _attempted.clear();
-    _centralCodes.clear();
-    _centralSessions.clear();
-    friendWire.clear();
+  Future<void> stop() {
+    _generation++;
+    final service = _service;
+    final startup = _startupWork;
+    final connection = _connectionWork;
+    _startupWork = _connectionWork = null;
+    _service = null;
+    _session = null;
+    _timer?.cancel();
     final subscriptions = _subscriptions.toList();
     _subscriptions.clear();
-    for (final sub in subscriptions) {
-      await sub.cancel();
-    }
-    final peer = _connecting;
-    if (peer != null) {
-      try {
-        await _central?.disconnect(peer).timeout(const Duration(seconds: 2));
-      } catch (_) {
-        /* No active link. */
+    final closingLinks = _connections.values.toList();
+    _connections.clear();
+    _initiated.clear();
+    _devices.clear();
+    _tips.clear();
+    _seen.clear();
+    _visibleTargets = const [];
+    _connectingDevice = null;
+    greeting = replyTo = status = null;
+    friendWire.clear();
+    return _stopWork = _stopWork.catchError((Object _) {}).then((_) async {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
       }
-    }
-    await _native(() async {
-      try {
-        await _central?.stopDiscovery();
-      } catch (_) {
-        /* Radio unavailable. */
-      }
-      try {
-        await _peripheral?.stopAdvertising();
-      } catch (_) {
-        /* Radio unavailable. */
-      }
-      try {
-        await _peripheral?.removeAllServices();
-      } catch (_) {
-        /* Radio unavailable. */
-      }
+      if (service == null) return;
+      await Future.wait(closingLinks.map(_closeSignalClient));
+      // A native start can still be pending when SP leaves the foreground.
+      await startup?.catchError((Object _) {});
+      // Release the scan listener before a connecting transport can resume it.
+      await Future.wait([
+        service.stopDiscovery().catchError((Object _) {}),
+        service.stopAdvertising().catchError((Object _) {}),
+      ]);
+      // requestConnection registers its session late. Let that finish before
+      // closing the service so dispose also disconnects that session.
+      await connection;
+      await service.dispose();
     });
-    await _exchangeWork;
   }
 
   @override
   Future<void> openSettings() async {
-    if (_central != null) await _central!.showAppSettings();
+    await gps.Geolocator.openAppSettings();
   }
+}
+
+class _Device {
+  _Device(this.peer);
+  Peer peer;
+  final signal = HatTipSignal();
+  DateTime attemptedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  void update(Peer incoming) {
+    peer = incoming;
+    signal.observe(incoming.lastSeen, incoming.rssi);
+  }
+}
+
+class _Connection {
+  _Connection(this.id, this.device, {required this.isCentral});
+  final String id, device;
+  final bool isCentral;
+  final signal = HatTipSignal();
+  DateTime lastSignalRead = DateTime.fromMillisecondsSinceEpoch(0);
+  ({DateTime receivedAt, bool close})? sharedRange;
+  bool? lastSignalClose;
+  bool reportedMissingSignal = false;
+  bool readingSignal = false;
+  String? session, identity, team;
+  DateTime lastHello = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime lastSeen = DateTime.now();
+  Future<void> tail = Future.value();
+  int incoming = 0;
+  bool sending = false;
 }

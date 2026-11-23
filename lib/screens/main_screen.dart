@@ -75,6 +75,6 @@ class MainScreen extends StatelessWidget {
         ),
       ],
     ),
-    body: const MapScreen(),
+    body: MapScreen(membership: TeamScope.of(context)),
   );
 }

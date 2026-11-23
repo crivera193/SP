@@ -361,12 +361,26 @@ void main() {
     catalog.dispose();
   });
   testWidgets(
-    'actual diamond/horse/plant/cat Lotties switch by proximity, keep team colors and survive taps',
+    'landmark Lotties switch by proximity, keep team colors and handle taps',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
+      final duck = QuizLocation.fromJson({
+        ...location(id: 'eieab', animation: 'duck', owner: 'Red'),
+        'name': 'Computer Science (EIEAB)',
+        'latitude': 26.30637471,
+        'longitude': -98.17457576,
+      });
+      final proximity = SpotProximity([duck]);
+      final start = DateTime.utc(2026);
+      var now = start;
+      void updateDuckFix(int seconds, CampusPoint point) {
+        now = start.add(Duration(seconds: seconds));
+        proximity.accept(CampusFix(point, 3, now), onCampus: true, now: now);
+      }
+
       final locations = [
         QuizLocation.fromJson(location(owner: 'Blue')),
         QuizLocation.fromJson(
@@ -375,6 +389,7 @@ void main() {
         QuizLocation.fromJson(
           location(id: 'cats', animation: 'cats', owner: 'Blue'),
         ),
+        duck,
       ];
       final positions = {
         'horse': const Offset(100, 220),
@@ -383,9 +398,11 @@ void main() {
         'plant#0': const Offset(290, 220),
         'cats': const Offset(195, 430),
         'cats#0': const Offset(195, 430),
+        'eieab': const Offset(195, 600),
+        'eieab#0': const Offset(195, 600),
       };
       final key = GlobalKey();
-      var opened = 0;
+      final opened = <String>[];
       var canOpen = true;
       Future<void> render(Set<String> revealed) async {
         await tester.pumpWidget(
@@ -398,9 +415,11 @@ void main() {
                   child: QuizMarkers(
                     locations: locations,
                     positions: positions,
-                    revealed: revealed,
-                    canOpen: (_) => canOpen,
-                    onOpen: (_) => opened++,
+                    revealed: {...revealed, ...proximity.revealedSpots(now)},
+                    canOpen: (point) => point.id == duck.id
+                        ? proximity.attackReason(point, now) == null
+                        : canOpen,
+                    onOpen: (point) => opened.add(point.id),
                   ),
                 ),
               ),
@@ -415,9 +434,24 @@ void main() {
 
       await render({});
       expect(find.byKey(const ValueKey('horse:diamond')), findsOneWidget);
+      final duckDiamond = find.byKey(const ValueKey('eieab:diamond'));
+      final duckMarker = find.byKey(const ValueKey('eieab:0'));
+      expect(duckDiamond, findsOneWidget);
+      expect(
+        tester
+            .widget<TeamLottie>(
+              find.descendant(
+                of: duckDiamond,
+                matching: find.byType(TeamLottie),
+              ),
+            )
+            .color,
+        duck.owner!.color,
+      );
       await capture(tester, key, 'diamonds-390x844');
       await tester.tap(find.byKey(const ValueKey('horse:diamond')));
-      expect(opened, 0, reason: 'outside proximity cannot open a quiz');
+      await tester.tap(duckDiamond);
+      expect(opened, isEmpty, reason: 'outside proximity cannot open a quiz');
       expect(
         find.byKey(const ValueKey('horse:diamond')),
         findsOneWidget,
@@ -426,17 +460,33 @@ void main() {
       await render({'horse', 'plant', 'cats'});
       expect(find.byKey(const ValueKey('horse:0')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('horse:0')));
-      expect(opened, 1, reason: 'a nearby, eligible point can open its quiz');
+      expect(opened, ['horse']);
       canOpen = false;
       await render({'horse', 'plant', 'cats'});
       await tester.tap(find.byKey(const ValueKey('horse:0')));
-      expect(
-        opened,
-        1,
-        reason: 'lost eligibility blocks even a revealed marker',
-      );
+      expect(opened, [
+        'horse',
+      ], reason: 'lost eligibility blocks even a revealed marker');
       canOpen = true;
+      updateDuckFix(0, duck.point);
       await render({'horse', 'plant', 'cats'});
+      expect(duckDiamond, findsOneWidget);
+      updateDuckFix(3, duck.point);
+      await render({'horse', 'plant', 'cats'});
+      expect(duckDiamond, findsNothing);
+      expect(duckMarker, findsOneWidget);
+      expect(
+        tester
+            .widget<TeamLottie>(
+              find.byKey(
+                const ValueKey('assets/animations/animals/walking-duck.json'),
+              ),
+            )
+            .color,
+        duck.owner!.color,
+      );
+      await tester.tap(duckMarker);
+      expect(opened, ['horse', 'eieab']);
       expect(
         tester
             .widget<TeamLottie>(
@@ -456,11 +506,24 @@ void main() {
       locations[0] = QuizLocation.fromJson(location(revision: 3));
       await render({'horse', 'plant', 'cats'});
       await capture(tester, key, 'unclaimed-390x844');
+      final outside = CampusPoint(
+        duck.point.longitude + .001,
+        duck.point.latitude,
+      );
+      updateDuckFix(4, outside);
       await render({});
+      expect(duckMarker, findsOneWidget);
+      await tester.tap(duckMarker);
+      expect(opened, ['horse', 'eieab'], reason: 'tap rechecks entry distance');
+      updateDuckFix(7, outside);
+      await render({});
+      expect(duckDiamond, findsOneWidget);
+      expect(duckMarker, findsNothing);
       expect(find.byKey(const ValueKey('horse:diamond')), findsOneWidget);
       expect(find.byKey(const ValueKey('horse:0')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('horse:diamond')));
-      expect(opened, 1, reason: 'leaving proximity disables the quiz again');
+      await tester.tap(duckDiamond);
+      expect(opened, ['horse', 'eieab'], reason: 'departure restores diamonds');
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox.shrink());
     },

@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:ui' as ui;
+
 import 'package:campus_app/nearby/contact_log.dart';
 import 'package:campus_app/nearby/friend_protocol.dart';
 import 'package:campus_app/nearby/nearby_models.dart';
@@ -9,8 +9,6 @@ import 'package:campus_app/nearby/offline_friend_repository.dart';
 import 'package:campus_app/nearby/verified_friend_book.dart';
 import 'package:campus_app/nearby/nearby_widgets.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'nearby_players_test.dart' as discovery;
@@ -24,98 +22,44 @@ const encounter = Duration(seconds: 18);
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
-  testWidgets(
-    'nearby level displays only confirmed progress and preserves it during a failed sync',
-    (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final log = ContactLog('fixture');
-      await log.load();
-      final controller = NearbyController(
-        discovery.FakeRepository(),
-        discovery.FakeRadio(),
-        contacts: log,
-        observeLifecycle: false,
-      );
-      final key = GlobalKey();
-      await tester.runAsync(() async {
-        await (FontLoader(
-          'Inter',
-        )..addFont(rootBundle.load('assets/fonts/Inter-Variable.ttf'))).load();
-        await (FontLoader(
-          'MaterialIcons',
-        )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
-      });
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: ThemeData(
-            useMaterial3: true,
-            fontFamily: 'Inter',
-            colorSchemeSeed: const Color(0xff123d2b),
-          ),
-          home: RepaintBoundary(
-            key: key,
-            child: Scaffold(body: NearbyPanel(controller: controller)),
-          ),
-        ),
-      );
-      expect(find.text('Level unavailable.'), findsOneWidget);
-      expect(find.byKey(const ValueKey('contact-level')), findsNothing);
-      await log.acknowledge(
-        {},
-        ContactProgress.fromJson({
-          'level': 2,
-          'quiz_points': 1,
-          'friend_seconds': 900,
-          'seconds_per_level': 600,
-          'seconds_into_level': 300,
-        }),
-      );
-      await tester.pump();
-      expect(find.text('Level 2'), findsOneWidget);
-      expect(find.text('5:00 / 10:00'), findsOneWidget);
-      log.syncFailed();
-      await tester.pump();
-      expect(find.text('Level 2'), findsOneWidget);
-      expect(
-        find.text('Level progress will sync when connected.'),
-        findsOneWidget,
-      );
-      await log.acknowledge(
-        {},
-        ContactProgress.fromJson({
-          'level': 10,
-          'quiz_points': 2,
-          'friend_seconds': 5400,
-          'seconds_per_level': 600,
-          'seconds_into_level': 0,
-        }),
-      );
-      await tester.pump();
-      expect(find.text('Level 10'), findsOneWidget);
-      expect(find.text('Correct quiz: 2 points'), findsOneWidget);
-      expect(
-        find.text('Level progress will sync when connected.'),
-        findsNothing,
-      );
-      expect(tester.takeException(), isNull);
-      await tester.runAsync(() async {
-        final boundary =
-            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-        final image = await boundary.toImage();
-        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File(
-          'output/friends/contact-level-widget.png',
-        ).writeAsBytes(bytes!.buffer.asUint8List());
-        image.dispose();
-      });
-      await tester.pumpWidget(const SizedBox.shrink());
-      controller.dispose();
-      log.dispose();
-    },
-  );
+  testWidgets('saved progression and sync status stay out of Nearby', (
+    tester,
+  ) async {
+    final log = ContactLog('fixture');
+    addTearDown(log.dispose);
+    await log.load();
+    final controller = NearbyController(
+      discovery.FakeRepository(),
+      discovery.FakeRadio(),
+      contacts: log,
+      observeLifecycle: false,
+    );
+    addTearDown(controller.dispose);
+    await log.acknowledge(
+      {},
+      ContactProgress.fromJson({
+        'level': 10,
+        'quiz_points': 2,
+        'friend_seconds': 5400,
+        'seconds_per_level': 600,
+        'seconds_into_level': 0,
+      }),
+    );
+    log.syncFailed();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: NearbyPanel(controller: controller)),
+      ),
+    );
+    expect(find.text('Nearby players'), findsOneWidget);
+    expect(find.text('Level 10'), findsNothing);
+    expect(find.textContaining('Correct quiz'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.text(log.error!), findsNothing);
+    expect(log.progress?.level, 10);
+    expect(log.progress?.quizPoints, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   test(
     'only fresh verified receipts count; cached detections, gaps and pause do not',
     () async {

@@ -42,6 +42,7 @@ class QuizMarkers extends StatelessWidget {
         : switch (l.animation) {
             'horse' => (120.0, 120.0, 75.0),
             'plant' => (90.0, 110.0, 110.0),
+            'duck' => (150.0, 100.0, 83.0),
             _ => (90.0, 65.0, 59.0),
           };
     if (p.dx < -width ||
@@ -55,6 +56,7 @@ class QuizMarkers extends StatelessWidget {
         : switch (l.animation) {
             'horse' => 'assets/animations/animals/stallion.json',
             'plant' => 'assets/animations/plants/Monstera_leaf.json',
+            'duck' => 'assets/animations/animals/walking-duck.json',
             _ =>
               'assets/animations/kitty-island/cat-${const ['dark', 'orange', 'gray'][index % 3]}.json',
           };

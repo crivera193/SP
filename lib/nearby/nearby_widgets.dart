@@ -1,13 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mb;
 import '../player/latest_projection.dart';
 import 'nearby_controller.dart';
 import 'nearby_models.dart';
-import 'friend_protocol.dart';
-import 'friend_controller.dart';
-import 'contact_log.dart';
 
 class NearbyButton extends StatelessWidget {
   const NearbyButton({super.key, required this.controller});
@@ -64,31 +60,23 @@ class NearbyPanel extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(controller.status, key: const ValueKey('nearby-status')),
-              if (controller.contacts case final ContactLog contacts) ...[
-                const SizedBox(height: 12),
-                if (contacts.progress case final ContactProgress progress) ...[
-                  Text(
-                    'Level ${progress.level}',
-                    key: const ValueKey('contact-level'),
-                  ),
-                  Text(
-                    'Correct quiz: ${progress.quizPoints} ${progress.quizPoints == 1 ? 'point' : 'points'}',
-                  ),
-                  const SizedBox(height: 6),
-                  LinearProgressIndicator(
-                    value: progress.secondsIntoLevel / progress.secondsPerLevel,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${_time(progress.secondsIntoLevel)} / ${_time(progress.secondsPerLevel)}',
-                  ),
-                ] else
-                  Text(contacts.error ?? 'Level unavailable.'),
-                if (contacts.progress != null && contacts.error != null)
-                  Text(contacts.error!),
+              if (controller.peers.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _detectedPlayers(context),
               ],
-              if (controller.friends case final FriendController friends)
-                ..._friendControls(context, friends),
+              if (controller.hats case final radio?
+                  when controller.running) ...[
+                if (radio.greeting case final greeting?) Text(greeting),
+                if (radio.status case final status?) Text(status),
+                if (radio.replyTo case final sender?
+                    when radio.targets.any(
+                      (target) => target.session == sender,
+                    ))
+                  FilledButton.tonal(
+                    onPressed: () => unawaited(radio.tip(sender)),
+                    child: const Text('Tip back'),
+                  ),
+              ],
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -124,35 +112,14 @@ class NearbyPanel extends StatelessWidget {
     ),
   );
 
-  static String _time(int seconds) =>
-      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
-
-  List<Widget> _friendControls(BuildContext context, FriendController friends) {
-    final disabled = friends.busy || !controller.running;
-
-    return [
-      if (friends.error case final String error)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                error,
-                key: const ValueKey('friend-error'),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-              TextButton(
-                onPressed: disabled
-                    ? null
-                    : () => unawaited(controller.refresh()),
-                child: const Text('Retry friend verification'),
-              ),
-            ],
-          ),
-        ),
-      if (controller.peers.isNotEmpty) ...[
-        const SizedBox(height: 16),
+  Widget _detectedPlayers(BuildContext context) {
+    final radio = controller.hats;
+    final targets = {
+      for (final target in radio?.targets ?? const []) target.session: target,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         Text(
           'Detected players',
           style: Theme.of(context).textTheme.titleMedium,
@@ -161,92 +128,35 @@ class NearbyPanel extends StatelessWidget {
           ListTile(
             contentPadding: EdgeInsets.zero,
             key: ValueKey('detected-${peer.id}'),
-            leading: Icon(
-              peer.friendship == Friendship.accepted
-                  ? Icons.verified_user
-                  : Icons.person_outline,
-            ),
-            subtitle: Text(switch (peer.friendship) {
-              Friendship.none => 'Detected · communication locked',
-              Friendship.incoming => 'Wants to be your friend',
-              Friendship.outgoing => 'Friend request sent',
-              Friendship.accepted => 'Known friend · verify over Bluetooth',
-            }),
-            trailing: switch (peer.friendship) {
-              Friendship.none =>
-                peer.identityCode == null
-                    ? const Icon(Icons.lock_outline)
-                    : IconButton(
-                        tooltip: 'Copy friend code',
-                        icon: const Icon(Icons.copy),
-                        onPressed: () => Clipboard.setData(
-                          ClipboardData(
-                            text: NearbyProtocol.friendCode(peer.identityCode!),
-                          ),
-                        ),
-                      ),
-              Friendship.incoming => const Icon(Icons.lock_outline),
-              Friendship.outgoing => const Icon(Icons.schedule),
-              Friendship.accepted =>
-                friends.conversationFor(peer.id) == null
-                    ? IconButton(
-                        tooltip: 'Open Bluetooth session',
-                        onPressed: disabled || friends.error != null
-                            ? null
-                            : () => unawaited(friends.open(peer.id)),
-                        icon: const Icon(Icons.bluetooth_connected),
-                      )
-                    : const Icon(Icons.lock),
+            leading: const Icon(Icons.person_outline),
+            subtitle: switch (targets[peer.id]) {
+              final target? => Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: FilledButton.tonal(
+                  onPressed: () => unawaited(radio!.tip(target.session)),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                  ),
+                  child: Text(
+                    '🤠 Wave and tip your hat to the ${target.colorName} Vaquero',
+                    textAlign: TextAlign.start,
+                  ),
+                ),
+              ),
+              null => Text(
+                radio?.hasHatTipTeam(peer.id) == true
+                    ? 'Waiting for a close Bluetooth signal'
+                    : 'Player detected',
+              ),
             },
           ),
       ],
-      for (final conversation in friends.conversations)
-        _FriendConversationCard(
-          key: ValueKey(conversation.grant.id),
-          controller: friends,
-          conversation: conversation,
-        ),
-    ];
+    );
   }
-}
-
-class _FriendConversationCard extends StatelessWidget {
-  const _FriendConversationCard({
-    super.key,
-    required this.controller,
-    required this.conversation,
-  });
-  final FriendController controller;
-  final FriendConversation conversation;
-  @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.lock_outline),
-              const SizedBox(width: 8),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Close Bluetooth session',
-                onPressed: () =>
-                    unawaited(controller.close(conversation.grant.id)),
-                icon: const Icon(Icons.close),
-              ),
-            ],
-          ),
-          Text(
-            conversation.ready
-                ? 'Verified Bluetooth session'
-                : 'Waiting for your friend’s verified Bluetooth reply…',
-          ),
-        ],
-      ),
-    ),
-  );
 }
 
 /// Projects only the already-authorized set. Coordinates never select players.

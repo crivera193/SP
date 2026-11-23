@@ -17,7 +17,7 @@ class OfflineNearbyRepository implements NearbyRepository {
   NearbyConfig get config {
     final settings = book.settings;
     if (settings == null) {
-      throw StateError('Open Friends once to prepare Bluetooth.');
+      throw StateError('Open the app online once to prepare Nearby.');
     }
     return NearbyConfig(settings);
   }
@@ -48,7 +48,7 @@ class OfflineNearbyRepository implements NearbyRepository {
   @override
   Future<NearbySession> open(String requestId) async {
     if (!book.loaded || book.selfCode == null) {
-      throw StateError('Open Friends once to prepare Bluetooth.');
+      throw StateError('Open the app online once to prepare Nearby.');
     }
     final c = config;
     active = requestId;

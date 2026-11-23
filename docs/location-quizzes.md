@@ -53,11 +53,25 @@ Outside diamonds cannot open it. Taps do not control revelation.
 Departure or unavailable GPS restores diamonds. The owner's
 team hue applies to both forms, retaining Lottie shading and dark details.
 
-SP's encrypted offline friend protocol is reused. Only an accepted friend with
-a proved, open Bluetooth session may supply a map position. Close or local
-removal withdraws it immediately. The legacy online endpoint now checks accepted
-friendship too. Offline remote-removal limits remain as documented in
-[nearby-players.md](nearby-players.md).
+## Computer Science (EIEAB)
+
+The local EIEAB migration adds a quiz on the mapped pedestrian path north of
+the [Interdisciplinary Engineering & Academic Building](https://www.utrgv.edu/cecs/departments/csci/ta-center/index.htm).
+It uses the existing placeholder question and the same GPS, tap, scoring and
+cooldown rules as other landmarks. The outdoor anchor comes from the bundled
+campus map over OpenStreetMap way 1361378090.
+
+The nearby marker uses Richard Sahala Hartanto's
+[Walking Duck](https://lottiefiles.com/free-animation/walking-duck-jA9wVMhdgK).
+The bundled JSON is the animation from the original dotLottie download. Its
+Lottie Simple License is in `assets/animations/animals/walking-duck.LICENSE.txt`.
+The catalog uses the app's advertised animations to keep the original markers
+available to older builds and send EIEAB to builds that can render the duck.
+
+The migration remains local. Isolated PostgreSQL checks cover both catalogs and
+EIEAB's proximity, scoring and cooldown. The 390×844 Flutter widget test
+checks the diamond and duck, team tint, taps and departure with synthetic GPS.
+The outdoor anchor still needs an on-campus GPS check.
 
 ## On-demand questions and the Windows worker
 
@@ -121,6 +135,14 @@ and resident Ollama process rendered a fresh quiz in 310 ms. The app
 submitted False and local Supabase saved a correct answer worth one point.
 This run used the published worker executable in a terminal session.
 Windows service registration, boot behavior and service recovery were pending.
+
+## Friend positions
+
+SP's encrypted offline friend protocol is reused. Only an accepted friend with
+a proved, open Bluetooth session may supply a map position. Close or local
+removal withdraws it immediately. The legacy online endpoint now checks accepted
+friendship too. Offline remote-removal limits remain as documented in
+[nearby-players.md](nearby-players.md).
 
 ## Applied backend
 

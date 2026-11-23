@@ -214,6 +214,9 @@ class FriendWire {
 
   Future<bool> offer(String id, String central, {String? peerToken}) async {
     if (_boxes[id]?.grant.live == true) {
+      if (peerToken != null && _boxes[id]!.grant.peerToken != peerToken) {
+        return false;
+      }
       return _bind(id, central);
     }
     final pending = _offers[id];

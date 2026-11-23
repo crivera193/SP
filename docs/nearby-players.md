@@ -5,6 +5,39 @@ UTRGV-GOTest is outside scope. These Bluetooth changes are based on main
 `a8ea6e9252395244cede19626e7edafe5204a129`. On November 16, the owner authorized
 committing and pushing this checked work to SP main using crivera193.
 
+## November 22 Hat Tip test
+
+The local SP builds use `nearby` 0.2.0 for BLE discovery and direct payloads.
+SP's separate friend verification still gates position sharing. Hat-tip buttons
+use saved team colors and add a temporary code when two eligible peers match.
+The initial signal filter uses three fresh readings and a median threshold of
+−65 dBm for an approximate close range. The 10-foot target is uncalibrated.
+
+Galaxy build 12073 and iPhone build 13 discovered one another in SP. The
+Galaxy sent the greeting to the iPhone and received the app receipt over BLE.
+The filled buttons were installed in place in Galaxy build 12074 and iPhone
+build 14. The two-way test with Wi-Fi and cellular disabled is pending.
+
+The Galaxy later hid the hat-tip button next to the iPhone. SP now prefers
+fresh signal samples from its active BLE connection where available. Galaxy
+build 12075 showed the button and received a delivery receipt from iPhone
+build 14. The same signal change was installed and launched on iPhone build 15.
+
+After the Bluetooth-only failure, SP was changed to stop advertising and remove
+the scan listener before waiting for a pending BLE connection, then dispose the
+old service before restarting. Both restart regression tests passed. Android
+build 12076 installed over USB. With Wi-Fi and cellular off, Bluetooth on, and
+no default network, the Galaxy restarted BLE discovery after a trip to Settings.
+iPhone build 16 installed in place and opened after one-time iOS developer-app
+verification. On the same builds, both phones discovered each other, handled
+a hat tip and showed a delivery receipt. The Galaxy reported Wi-Fi off, cellular
+data off and no default network. iPhone Settings showed Wi-Fi still enabled
+with connections disconnected in Control Center and cellular data assigned to
+Primary. After the owner confirmed both iPhone switches were off in Settings,
+Galaxy-to-iPhone delivery passed again at 21:56 local time. The greeting
+appeared on the iPhone and the Galaxy logged the BLE receipt. The reverse
+direction still awaits a physical tap on the iPhone's Tip back button.
+
 ## Current behavior — November 16, 2026
 
 ### November 18 contact logging and levels
@@ -68,22 +101,29 @@ installed APK bytes matched. Its signed-in campus map and live Nearby level-1,
 one-point, 0:00/10:00 panel were observed at 1440x3120; Bluetooth enabled normally
 and reported no players while the iPhone was locked. No qualifying time was
 awarded in this state. Both normal QA-account RPC reads and weighted quiz catalogs
-passed against live SP2.0. Signed iPhone release 12 is ready but not installed:
-the Mac still reports the device locked when mounting the developer image.
+passed against live SP2.0. The iPhone was locked during the November 18
+installation attempt.
 Source fingerprint: `41883531f6ae086bfb0574f720251a0b8d764e9904ba0238ee9ef4abcda175c8`.
 Build/install proofs are `output/friends/contact-phone-install.json` and
 `contact-rewards-ios-artifact-proof.json`; native capture is
 `android-contact-level-live-12072.png`.
 
+On November 22, the Mac verified the signature, device provision and source
+fingerprint of iPhone release 12, then installed it over build 11. The Mac read
+back build 12 for `com.example.campusApp` and launched it. The native iPhone
+screen exposed Edinburg Campus, Nearby players and Sign out, confirming the
+existing sign-in reached the campus map. See
+`output/friends/contact-rewards-ios-install-proof.json` and
+`output/friends/contact-rewards-ios-launch-ui.json`.
+
 Both dedicated QA accounts still have no friends. Automatic approval review
 rejected the proposed normal request/accept setup with only "blocked by policy";
 that command never ran and no test friendship was created. The owner subsequently
-authorized this temporary pairing and its removal; do not ask again. The iPhone
-unlock request is still pending. Once the device is ready, establish only the
-dedicated QA pair through normal request/accept, then install
-the already signed build 12 using `tmp/install_contacts_iphone.py`, observe actual
-two-phone contact time and withdrawal, and restore the pair's initial removed
-state. Do not replay migrations or rebuild unchanged apps. The owner authorized
+authorized this temporary pairing and its removal; do not ask again. The
+two-phone contact-time check is still pending. For that check, establish only
+the dedicated QA pair through normal request/accept, observe contact time and
+withdrawal, and restore the pair's initial removed state. Do not replay
+migrations or rebuild unchanged apps. The owner authorized
 committing and pushing these checked updates to SP main on November 18.
 
 The range operations follow the [PostgreSQL range documentation](https://www.postgresql.org/docs/current/rangetypes.html).

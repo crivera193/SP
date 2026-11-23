@@ -6,6 +6,8 @@ import '../teams/game_team.dart';
 /// Adapted from GOTest's live point catalog; SP owns the schema and team data.
 @immutable
 class QuizLocation extends GameSpot {
+  static const supportedAnimations = {'horse', 'plant', 'cats', 'duck'};
+
   QuizLocation.fromJson(Map<String, dynamic> j)
     : description = j['description'] as String,
       animation = j['animation'] as String,
@@ -49,7 +51,7 @@ class QuizLocation extends GameSpot {
         !exitMeters.isFinite ||
         entryMeters <= 0 ||
         exitMeters <= entryMeters ||
-        !const {'horse', 'plant', 'cats'}.contains(animation) ||
+        !supportedAnimations.contains(animation) ||
         artOffsets.isEmpty ||
         artOffsets.length > 8 ||
         artOffsets.any(

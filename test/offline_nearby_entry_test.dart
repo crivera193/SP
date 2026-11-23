@@ -77,7 +77,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('nearby-players')), findsNothing);
       expect(
-        find.text('Verify friends online once to prepare Bluetooth.'),
+        find.text('Open the app online once to prepare Nearby.'),
         findsOneWidget,
       );
       await tester.pumpWidget(const SizedBox.shrink());

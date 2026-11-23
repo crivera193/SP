@@ -29,13 +29,14 @@ import '../nearby/nearby_widgets.dart';
 import '../nearby/verified_friend_book.dart';
 import '../nearby/online_friend_directory.dart';
 import '../nearby/offline_nearby_repository.dart';
-import '../nearby/offline_friend_repository.dart';
-import '../nearby/friend_directory_widgets.dart';
 import '../nearby/contact_log.dart';
 import '../nearby/contact_progress_sync.dart';
+import '../nearby/hat_tip.dart';
+import '../teams/team_membership.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({super.key, required this.membership});
+  final TeamMembership membership;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -48,13 +49,12 @@ class _MapScreenState extends State<MapScreen>
   OnlineFriendDirectory? _friendDirectory;
   ContactLog? _contacts;
   ContactProgressSync? _contactSync;
-  final _nearbyCamera = ValueNotifier<int>(0);
   NearbyController get _nearbyController {
-    if (_nearby == null) _initFriends();
+    if (_nearby == null) _initNearby();
     return _nearby!;
   }
 
-  void _initFriends() {
+  void _initNearby() {
     if (_nearby != null) return;
     final client = Supabase.instance.client;
     final book = VerifiedFriendBook(client.auth.currentUser!.id);
@@ -65,23 +65,19 @@ class _MapScreenState extends State<MapScreen>
     _contactSync = ContactProgressSync(client, contacts);
     unawaited(_contactSync!.start());
     final local = OfflineNearbyRepository(book);
+    final teams = HatTipTeams(book.account);
+    unawaited(
+      teams
+          .save(widget.membership.team!, widget.membership.choices)
+          .catchError((Object _) {}),
+    );
     final radio = BleNearbyRadio(
       identity: () => book.selfCode,
       onIdentity: local.identify,
+      teams: teams,
+      onChanged: () => _nearby?.hatStateChanged(),
     );
-    _nearby = NearbyController(
-      local,
-      radio,
-      contacts: contacts,
-      friendRepository: OfflineFriendRepository(local),
-      friendWire: radio.friendWire,
-      localPosition: local.encodePosition,
-      onPosition: (peer, fix) {
-        local.receivePosition(peer, fix);
-        unawaited(_nearby?.refresh());
-      },
-    );
-    book.addListener(_friendsChanged);
+    _nearby = NearbyController(local, radio, contacts: contacts);
     // Ordinary account bootstrap. No Bluetooth method can invoke this sync.
     unawaited(
       book.load().then((_) async {
@@ -90,11 +86,6 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  void _friendsChanged() {
-    if (!mounted) return;
-    unawaited(_nearby?.friends?.refresh());
-    setState(() {});
-  }
   // ==========================================
   // CAMERA CONFIGURATION
   // ==========================================
@@ -274,7 +265,7 @@ class _MapScreenState extends State<MapScreen>
     if (hasMapboxConfiguration) {
       _quizzes = QuizCatalog(SupabaseQuizRepository(Supabase.instance.client));
       _quizzes.addListener(_quizCatalogChanged);
-      _initFriends();
+      _initNearby();
       unawaited(_quizzes.load());
       unawaited(_load());
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -289,10 +280,8 @@ class _MapScreenState extends State<MapScreen>
     _nearby?.dispose();
     _contactSync?.dispose();
     _contacts?.dispose();
-    _friendBook?.removeListener(_friendsChanged);
     _friendDirectory?.dispose();
     _friendBook?.dispose();
-    _nearbyCamera.dispose();
 
     _expiry?.cancel();
 
@@ -431,7 +420,6 @@ class _MapScreenState extends State<MapScreen>
   // Visibility is independent of freshness: retain only the cosmetic last
   // accepted position. _lastPosition is cleared so it is not a current fix.
   void _holdTravel() {
-    _nearby?.updatePosition(null);
     _updateProximity(_proximity.unavailable);
     _cowboyMotion.stop();
     _travel.pause();
@@ -937,7 +925,6 @@ class _MapScreenState extends State<MapScreen>
 
     // Hide Vaquero outside campus.
     if (!campus.contains(point)) {
-      _nearby?.updatePosition(null);
       _updateProximity(_proximity.unavailable);
       _cowboyMotion.stop();
       _clearTravel();
@@ -973,10 +960,6 @@ class _MapScreenState extends State<MapScreen>
       _holdTravel();
       return;
     }
-
-    _nearby?.updatePosition(
-      CampusFix(point, position.accuracy, position.timestamp),
-    );
 
     _updateProximity(
       () => _proximity.accept(
@@ -1169,7 +1152,6 @@ class _MapScreenState extends State<MapScreen>
               viewport: _initialViewport,
 
               onCameraChangeListener: (_) {
-                _nearbyCamera.value++;
                 _syncQuizLocations();
 
                 unawaited(_projector.request(invalidate: true));
@@ -1232,28 +1214,11 @@ class _MapScreenState extends State<MapScreen>
             placement: _cowboyPlacement,
             active: _ready && _foreground,
           ),
-          if (_ready && nearby != null)
-            Positioned.fill(
-              child: NearbyMapLayer(
-                controller: nearby,
-                map: _map,
-                cameraChanges: _nearbyCamera,
-                active: _foreground && _error == null,
-              ),
-            ),
-          if (_ready)
+          if (nearby != null)
             Positioned(
               left: 12,
               top: 12,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  NearbyButton(controller: nearby!),
-                  const SizedBox(height: 8),
-                  if (_friendDirectory != null)
-                    FriendDirectoryButton(directory: _friendDirectory!),
-                ],
-              ),
+              child: NearbyButton(controller: nearby),
             ),
 
           // ==================================
