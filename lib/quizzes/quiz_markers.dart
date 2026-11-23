@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+
 import 'quiz_models.dart';
 
-/// Animation vocabulary is bundled artwork; locations, offsets and owners are data.
+/// Displays the animation for each quiz location and enables taps in range.
 class QuizMarkers extends StatelessWidget {
   const QuizMarkers({
     super.key,
@@ -12,73 +13,76 @@ class QuizMarkers extends StatelessWidget {
     required this.canOpen,
     required this.onOpen,
   });
+
   final List<QuizLocation> locations;
   final Map<String, Offset> positions;
   final Set<String> revealed;
   final bool Function(QuizLocation) canOpen;
   final void Function(QuizLocation) onOpen;
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) => Stack(
       clipBehavior: Clip.hardEdge,
       children: [
         for (final location in locations)
-          if (!revealed.contains(location.id)) ...[
-            if (positions[location.id] case final Offset p)
-              _marker(location, p, -1, bounds),
-          ] else ...[
-            for (var i = 0; i < location.artOffsets.length; i++)
-              if (positions['${location.id}#$i'] case final Offset p)
-                _marker(location, p, i, bounds),
-          ],
+          for (var i = 0; i < location.artOffsets.length; i++)
+            if (positions['${location.id}#$i'] case final Offset position)
+              _marker(location, position, i, bounds),
       ],
     ),
   );
-  Widget _marker(QuizLocation l, Offset p, int index, BoxConstraints bounds) {
-    final diamond = index < 0;
-    final enabled = !diamond && canOpen(l);
-    final (width, height, anchorY) = diamond
-        ? (90.0, 90.0, 75.0)
-        : switch (l.animation) {
-            'horse' => (120.0, 120.0, 75.0),
-            'plant' => (90.0, 110.0, 110.0),
-            'duck' => (150.0, 100.0, 83.0),
-            _ => (90.0, 65.0, 59.0),
-          };
-    if (p.dx < -width ||
-        p.dy < -height ||
-        p.dx > bounds.maxWidth + width ||
-        p.dy > bounds.maxHeight + height) {
+
+  Widget _marker(
+    QuizLocation location,
+    Offset position,
+    int index,
+    BoxConstraints bounds,
+  ) {
+    final enabled = revealed.contains(location.id) && canOpen(location);
+    final (width, height, anchorY) = switch (location.animation) {
+      'horse' => (120.0, 120.0, 75.0),
+      'plant' || 'butterfly' => (90.0, 110.0, 110.0),
+      'duck' => (210.0, 140.0, 116.2),
+      _ => (90.0, 65.0, 59.0),
+    };
+
+    if (position.dx < -width ||
+        position.dy < -height ||
+        position.dx > bounds.maxWidth + width ||
+        position.dy > bounds.maxHeight + height) {
       return const SizedBox.shrink();
     }
-    final asset = diamond
-        ? 'assets/animations/markers/diamond_resting.json'
-        : switch (l.animation) {
-            'horse' => 'assets/animations/animals/stallion.json',
-            'plant' => 'assets/animations/plants/Monstera_leaf.json',
-            'duck' => 'assets/animations/animals/walking-duck.json',
-            _ =>
-              'assets/animations/kitty-island/cat-${const ['dark', 'orange', 'gray'][index % 3]}.json',
-          };
+
+    final asset = switch (location.animation) {
+      'horse' => 'assets/animations/animals/stallion.json',
+      'plant' => 'assets/animations/plants/Monstera_leaf.json',
+      'duck' => 'assets/animations/animals/walking-duck.json',
+      'butterfly' => 'assets/animations/plants/floral-butterfly.json',
+      _ =>
+        'assets/animations/kitty-island/cat-${const ['dark', 'orange', 'gray'][index % 3]}.json',
+    };
+
     return Positioned(
-      key: ValueKey('${l.id}:${diamond ? 'diamond' : index}'),
-      left: p.dx - width / 2 + (l.animation == 'horse' && !diamond ? 10 : 0),
-      top: p.dy - anchorY,
+      key: ValueKey('${location.id}:$index'),
+      left: position.dx - width / 2 + (location.animation == 'horse' ? 10 : 0),
+      top: position.dy - anchorY,
       width: width,
       height: height,
       child: Semantics(
         label:
-            '${l.name}, ${l.owner?.displayName ?? 'unclaimed'}, ${diamond ? 'outside proximity' : 'nearby'}${enabled ? '. Open quiz' : ''}',
+            '${location.name}, ${location.owner?.displayName ?? 'unclaimed'}, '
+            '${enabled ? 'nearby. Open quiz' : 'quiz unavailable'}',
         button: true,
         enabled: enabled,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: enabled ? () => onOpen(l) : null,
+          onTap: enabled ? () => onOpen(location) : null,
           child: RepaintBoundary(
             child: TeamLottie(
               key: ValueKey(asset),
               asset: asset,
-              color: l.owner?.color ?? (diamond ? Colors.grey : null),
+              color: location.owner?.color,
             ),
           ),
         ),
@@ -87,11 +91,13 @@ class QuizMarkers extends StatelessWidget {
   }
 }
 
-/// Change fill hues without flattening eye/outline details or source shading.
+/// Applies team colors while preserving the animation's shading and details.
 class TeamLottie extends StatefulWidget {
   const TeamLottie({super.key, required this.asset, this.color});
+
   final String asset;
   final Color? color;
+
   @override
   State<TeamLottie> createState() => _TeamLottieState();
 }
@@ -100,8 +106,10 @@ class _TeamLottieState extends State<TeamLottie>
     with SingleTickerProviderStateMixin {
   late final _controller = AnimationController(vsync: this);
   bool _loaded = false;
+
   void _sync() {
     if (!_loaded) return;
+
     if (MediaQuery.disableAnimationsOf(context)) {
       _controller.stop();
       _controller.value = 0;
@@ -118,9 +126,11 @@ class _TeamLottieState extends State<TeamLottie>
 
   Color _tint(Color? start, Color? end, double progress) {
     final source = Color.lerp(start, end, progress) ?? widget.color!;
-    final original = HSLColor.fromColor(source),
-        target = HSLColor.fromColor(widget.color!);
+    final original = HSLColor.fromColor(source);
+    final target = HSLColor.fromColor(widget.color!);
+
     if (original.lightness < .04 || original.lightness > .96) return source;
+
     return target
         .withLightness(
           (original.lightness * .65 + target.lightness * .35).clamp(.08, .94),
@@ -168,6 +178,7 @@ class _TeamLottieState extends State<TeamLottie>
       ),
     ),
   );
+
   @override
   void dispose() {
     _controller.dispose();

@@ -361,7 +361,7 @@ void main() {
     catalog.dispose();
   });
   testWidgets(
-    'landmark Lotties switch by proximity, keep team colors and handle taps',
+    'landmark Lotties stay visible while proximity gates taps',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -433,30 +433,25 @@ void main() {
       }
 
       await render({});
-      expect(find.byKey(const ValueKey('horse:diamond')), findsOneWidget);
-      final duckDiamond = find.byKey(const ValueKey('eieab:diamond'));
+      final horseMarker = find.byKey(const ValueKey('horse:0'));
       final duckMarker = find.byKey(const ValueKey('eieab:0'));
-      expect(duckDiamond, findsOneWidget);
+      expect(horseMarker, findsOneWidget);
+      expect(duckMarker, findsOneWidget);
       expect(
         tester
             .widget<TeamLottie>(
               find.descendant(
-                of: duckDiamond,
+                of: duckMarker,
                 matching: find.byType(TeamLottie),
               ),
             )
             .color,
         duck.owner!.color,
       );
-      await capture(tester, key, 'diamonds-390x844');
-      await tester.tap(find.byKey(const ValueKey('horse:diamond')));
-      await tester.tap(duckDiamond);
+      await capture(tester, key, 'locked-animations-390x844');
+      await tester.tap(horseMarker, warnIfMissed: false);
+      await tester.tap(duckMarker, warnIfMissed: false);
       expect(opened, isEmpty, reason: 'outside proximity cannot open a quiz');
-      expect(
-        find.byKey(const ValueKey('horse:diamond')),
-        findsOneWidget,
-        reason: 'tap never reveals animation',
-      );
       await render({'horse', 'plant', 'cats'});
       expect(find.byKey(const ValueKey('horse:0')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('horse:0')));
@@ -470,10 +465,11 @@ void main() {
       canOpen = true;
       updateDuckFix(0, duck.point);
       await render({'horse', 'plant', 'cats'});
-      expect(duckDiamond, findsOneWidget);
+      expect(duckMarker, findsOneWidget);
+      await tester.tap(duckMarker, warnIfMissed: false);
+      expect(opened, ['horse'], reason: 'entry still requires confirmed GPS fixes');
       updateDuckFix(3, duck.point);
       await render({'horse', 'plant', 'cats'});
-      expect(duckDiamond, findsNothing);
       expect(duckMarker, findsOneWidget);
       expect(
         tester
@@ -517,13 +513,10 @@ void main() {
       expect(opened, ['horse', 'eieab'], reason: 'tap rechecks entry distance');
       updateDuckFix(7, outside);
       await render({});
-      expect(duckDiamond, findsOneWidget);
-      expect(duckMarker, findsNothing);
-      expect(find.byKey(const ValueKey('horse:diamond')), findsOneWidget);
-      expect(find.byKey(const ValueKey('horse:0')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('horse:diamond')));
-      await tester.tap(duckDiamond);
-      expect(opened, ['horse', 'eieab'], reason: 'departure restores diamonds');
+      expect(duckMarker, findsOneWidget);
+      expect(horseMarker, findsOneWidget);
+      await tester.tap(duckMarker, warnIfMissed: false);
+      expect(opened, ['horse', 'eieab'], reason: 'departure locks the quiz');
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox.shrink());
     },
