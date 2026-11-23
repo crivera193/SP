@@ -134,7 +134,23 @@ After at least 7,205 seconds without a new quiz attempt, the same worker
 and resident Ollama process rendered a fresh quiz in 310 ms. The app
 submitted False and local Supabase saved a correct answer worth one point.
 This run used the published worker executable in a terminal session.
-Windows service registration, boot behavior and service recovery were pending.
+
+On November 23 the generation schema and nine topics were applied to the
+production SP Supabase project, and Android release 12093 was installed on the
+Galaxy. The release signals support for pending questions. Production
+generation is enabled for every account on a compatible client. Older clients
+keep the existing quiz path until updated.
+
+The installed Windows service started before interactive sign-in after the
+authorized reboot and reconnected to production. A production QA request was
+ready in 854 ms at the API, while the first request took over 22 seconds after a
+timeout. A request during a worker-only network interruption recovered on the
+same attempt and retained the same question on retry. A separate queued
+request recovered on the same attempt after the worker and its Ollama process
+were stopped and restarted. The production scoring checks confirmed points
+for a correct answer and zero for a wrong answer. The checks rolled back
+their score changes. The Galaxy's tap-to-render timing still needs
+verification.
 
 ## Friend positions
 

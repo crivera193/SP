@@ -109,6 +109,8 @@ class SupabaseQuizRepository implements QuizRepository {
         'x-sp-quiz-animations',
         QuizLocation.supportedAnimations.join(','),
       );
+    } else if (name == 'sp_quiz_begin') {
+      request = request.setHeader('x-sp-quiz-generation', 'on-demand-v1');
     }
     final value = await request.timeout(const Duration(seconds: 20));
     check();

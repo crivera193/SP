@@ -68,6 +68,9 @@ declare
   l sp_quiz.locations;
   q sp_quiz.questions;
   a sp_quiz.attempts;
+  client_generation boolean:=coalesce(
+    nullif(current_setting('request.headers',true),'')::jsonb
+      ->>'x-sp-quiz-generation'='on-demand-v1',false);
   generate_live boolean;
 begin
   if request_id is null then raise exception 'Request ID required.' using errcode='22023'; end if;
@@ -76,7 +79,8 @@ begin
   if team is null then raise exception 'Choose your permanent team first.' using errcode='42501'; end if;
   select * into l from sp_quiz.locations where id=location_id for update;
   perform sp_quiz.require_fix(location_id,latitude,longitude,accuracy_meters,fix_at);
-  select enabled into generate_live from sp_quiz.generation_settings where singleton;
+  select enabled and client_generation into generate_live
+  from sp_quiz.generation_settings where singleton;
   select * into a from sp_quiz.attempts x
   where x.user_id=actor and x.request_id=sp_quiz_begin.request_id;
   if a.id is not null and a.location_id<>l.id then
@@ -92,6 +96,9 @@ begin
       a.answered_at+make_interval(secs=>l.repeat_after_seconds)<=clock_timestamp() then
       a:=null;
     end if;
+  end if;
+  if not client_generation and a.status in ('generating','generation_failed') then
+    raise exception 'Update SP to resume this quiz.' using errcode='55000';
   end if;
   if a.status='generation_failed' and generate_live then
     update sp_quiz.attempts set status='generating',worker_token=null,worker_deadline=null
