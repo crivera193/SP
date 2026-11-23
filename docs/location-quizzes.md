@@ -154,6 +154,14 @@ question at Bronco Point and recorded an incorrect answer for zero points.
 The worker generated and published it in 619 ms. That measurement covers
 the worker's processing and publish call. Tap-to-render remains unverified.
 
+The November 23 campus failure exhausted both true and false claims from
+the three original Health and Science topics. The production migration
+`20261123231500_sp_quiz_rotate_exhausted_topics.sql` skips exhausted facts,
+tries a different eligible team topic if generation fails, and adds seven
+verified Health and Science topics. The installed worker and app use the
+same RPCs. The three previously failed production attempts were retried
+in place and each received a new question.
+
 ## Friend positions
 
 SP's encrypted offline friend protocol is reused. Only an accepted friend with
