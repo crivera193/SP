@@ -149,8 +149,10 @@ same attempt and retained the same question on retry. A separate queued
 request recovered on the same attempt after the worker and its Ollama process
 were stopped and restarted. The production scoring checks confirmed points
 for a correct answer and zero for a wrong answer. The checks rolled back
-their score changes. The Galaxy's tap-to-render timing still needs
-verification.
+their score changes. Galaxy build 12093 opened a fresh Art and Stuff campus
+question at Bronco Point and recorded an incorrect answer for zero points.
+The worker generated and published it in 619 ms. That measurement covers
+the worker's processing and publish call. Tap-to-render remains unverified.
 
 ## Friend positions
 
