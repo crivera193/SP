@@ -59,6 +59,69 @@ removal withdraws it immediately. The legacy online endpoint now checks accepted
 friendship too. Offline remote-removal limits remain as documented in
 [nearby-players.md](nearby-players.md).
 
+## On-demand questions and the Windows worker
+
+The November 23 migrations add on-demand generation and the initial editable,
+source-linked topics. They leave generation disabled until
+`sp_quiz.generation_settings.enabled` is enabled in the intended backend.
+For local testing, apply them to the SP test database and enable generation
+there. The app continues to use SP's original quiz RPCs and server scoring.
+
+Supabase reads the account's saved team and keeps one pending attempt per
+eligible quiz. A private Realtime notification wakes the worker. It claims the
+attempt with a lease, generates and checks a short True/False statement,
+then commits the question and answer. Supabase broadcasts the player payload on
+the account's private channel. The existing quiz reads the same saved attempt
+if it misses the notification. Scoring and the answer key stay in Supabase.
+
+Publish the worker from the SP root with the .NET SDK.
+
+```powershell
+dotnet publish tool/sp-quiz-worker/SpQuizWorker.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o tmp/sp-quiz-worker-service
+```
+
+Create `worker.private.json` beside the published executable. Use the
+intended Supabase API URL and API key, a server-only service-role JWT,
+absolute paths to the standalone Ollama executable and its installed models,
+an available loopback port and the Ollama model tag.
+
+```json
+{
+  "supabase_url": "http://127.0.0.1:54481",
+  "supabase_key": "<local API key>",
+  "worker_token": "<local service-role JWT>",
+  "ollama_executable": "C:/path/to/ollama.exe",
+  "ollama_models": "C:/path/to/models",
+  "ollama_port": 11659,
+  "model": "qwen3:8b"
+}
+```
+
+Manage the service from an administrator PowerShell at the SP root.
+
+```powershell
+& .\tool\sp-quiz-worker\service.ps1 -Action Install -Package .\tmp\sp-quiz-worker-service
+sc.exe qc SpQuizWorker
+sc.exe qfailure SpQuizWorker
+& .\tool\sp-quiz-worker\service.ps1 -Action Uninstall
+```
+
+The service starts automatically before sign-in, runs under LocalService and
+logs to Event Viewer's Application log as **SP Quiz Worker**. It starts and
+supervises a dedicated loopback Ollama instance and keeps the model resident.
+Windows restarts the worker after an unexpected exit. A recovered worker can
+claim an expired attempt lease, while Supabase accepts a single result.
+An Android test build can set `SP_QUIZ_MEASURE=true` to log the interval
+from the quiz tap handler to the first Flutter frame containing the question.
+
+The November 23 local test used SP Android build 12091 in Android Studio's
+`SP_Walking_Crash_API36_1` emulator. The initial quiz rendered in 456 ms.
+After at least 7,205 seconds without a new quiz attempt, the same worker
+and resident Ollama process rendered a fresh quiz in 310 ms. The app
+submitted False and local Supabase saved a correct answer worth one point.
+This run used the published worker executable in a terminal session.
+Windows service registration, boot behavior and service recovery were pending.
+
 ## Applied backend
 
 The owner authorized deployment on November 17. Applied once, through the

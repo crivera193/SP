@@ -381,6 +381,9 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
     _quizOpen = true;
+    final openTimer = const bool.fromEnvironment('SP_QUIZ_MEASURE')
+        ? (Stopwatch()..start())
+        : null;
     final session = QuizSession(
       _quizzes,
       point.id,
@@ -389,7 +392,9 @@ class _MapScreenState extends State<MapScreen>
     );
     try {
       await Navigator.of(context).push<void>(
-        MaterialPageRoute(builder: (_) => QuizScreen(session: session)),
+        MaterialPageRoute(
+          builder: (_) => QuizScreen(session: session, openTimer: openTimer),
+        ),
       );
     } finally {
       session.dispose();

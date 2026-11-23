@@ -26,9 +26,75 @@ abstract interface class QuizRepository {
 }
 
 class SupabaseQuizRepository implements QuizRepository {
-  SupabaseQuizRepository(this.client) : userId = client.auth.currentUser!.id;
+  SupabaseQuizRepository(this.client) : userId = client.auth.currentUser!.id {
+    _channel = client.channel(
+      'sp-quiz-player:$userId',
+      opts: const RealtimeChannelConfig(private: true),
+    )..onBroadcast(event: 'quiz-ready', callback: _receive).subscribe();
+  }
   final SupabaseClient client;
   final String userId;
+  late final RealtimeChannel _channel;
+  final _ready = StreamController<QuizAttempt>.broadcast();
+  final _recent = <String, QuizAttempt>{};
+  bool _closed = false;
+
+  void _receive(Map<String, dynamic> payload) {
+    if (_closed || client.auth.currentUser?.id != userId) return;
+    try {
+      final body = Map<String, dynamic>.from(payload['payload'] as Map);
+      final attempt = QuizAttempt.fromJson(body);
+      if (attempt.generating) return;
+      _recent[attempt.id] = attempt;
+      if (_recent.length > 8) _recent.remove(_recent.keys.first);
+      _ready.add(attempt);
+    } catch (_) {
+      // Read the authoritative attempt if a notification cannot be decoded.
+    }
+  }
+
+  Future<QuizAttempt> waitUntilReady(String id) async {
+    if (_recent.remove(id) case final QuizAttempt attempt) return attempt;
+    final ready = Completer<QuizAttempt>();
+    final subscription = _ready.stream.listen(
+      (attempt) {
+        if (attempt.id == id && !ready.isCompleted) ready.complete(attempt);
+      },
+      onDone: () {
+        if (!ready.isCompleted) {
+          ready.completeError(StateError('Account closed.'));
+        }
+      },
+    );
+    try {
+      // The socket normally resolves the wait. These reads recover missed
+      // notifications using the same saved attempt.
+      for (final delay in const [1, 2, 4, 8]) {
+        final result = await Future.any<QuizAttempt?>([
+          ready.future,
+          Future<QuizAttempt?>.delayed(Duration(seconds: delay), () => null),
+        ]);
+        if (result != null) return result;
+        final recovered = await _rpc('sp_quiz_read', {'attempt_id': id});
+        final attempt = QuizAttempt.fromJson(
+          Map<String, dynamic>.from(recovered as Map),
+        );
+        if (!attempt.generating) return attempt;
+      }
+      throw TimeoutException('The quiz is still being generated.');
+    } finally {
+      _recent.remove(id);
+      await subscription.cancel();
+    }
+  }
+
+  void dispose() {
+    _closed = true;
+    _recent.clear();
+    unawaited(_ready.close());
+    unawaited(client.removeChannel(_channel));
+  }
+
   Future<dynamic> _rpc(String name, [Map<String, dynamic>? params]) async {
     void check() {
       if (client.auth.currentUser?.id != userId) {
@@ -164,6 +230,7 @@ class QuizCatalog extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    if (repository case final SupabaseQuizRepository live) live.dispose();
     super.dispose();
   }
 }

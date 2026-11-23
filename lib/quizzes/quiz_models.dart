@@ -89,7 +89,7 @@ class TeamScore {
 class QuizAttempt {
   QuizAttempt.fromJson(Map<String, dynamic> j)
     : id = j['id'] as String,
-      prompt = j['prompt'] as String,
+      prompt = j['prompt'] as String? ?? '',
       status = j['status'] as String,
       correct = j['correct'] as bool?,
       selected = j['selected'] as bool?,
@@ -119,4 +119,5 @@ class QuizAttempt {
   final QuizLocation location;
   bool get answered => status == 'answered';
   bool get active => status == 'active';
+  bool get generating => status == 'generating';
 }

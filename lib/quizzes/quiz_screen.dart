@@ -5,14 +5,16 @@ import 'quiz_repository.dart';
 import 'quiz_session.dart';
 
 class QuizScreen extends StatefulWidget {
-  const QuizScreen({super.key, required this.session});
+  const QuizScreen({super.key, required this.session, this.openTimer});
   final QuizSession session;
+  final Stopwatch? openTimer;
   @override
   State<QuizScreen> createState() => _QuizScreenState();
 }
 
 class _QuizScreenState extends State<QuizScreen> {
   Timer? _timer;
+  bool _reportedQuestionFrame = false;
   @override
   void initState() {
     super.initState();
@@ -37,6 +39,19 @@ class _QuizScreenState extends State<QuizScreen> {
   @override
   Widget build(BuildContext context) {
     final s = widget.session, point = s.location, a = s.attempt;
+    if (a != null &&
+        a.active &&
+        a.prompt.isNotEmpty &&
+        !_reportedQuestionFrame &&
+        widget.openTimer != null) {
+      _reportedQuestionFrame = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        debugPrint(
+          'SP_QUIZ_FRAME ${a.id} ${widget.openTimer!.elapsedMicroseconds}',
+        );
+      });
+    }
     final reason = s.unavailableReason();
     return Scaffold(
       appBar: AppBar(title: Text(point?.name ?? 'Location quiz')),

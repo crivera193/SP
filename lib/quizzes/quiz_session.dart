@@ -59,7 +59,16 @@ class QuizSession extends ChangeNotifier {
     busy = true;
     notifyListeners();
     try {
-      _accept(await catalog.repository.begin(locationId, _request, fix));
+      final repository = catalog.repository;
+      var next = await repository.begin(locationId, _request, fix);
+      if (next.generating && repository is SupabaseQuizRepository) {
+        next = await repository.waitUntilReady(next.id);
+      }
+      if (next.status == 'generation_failed') {
+        error = 'Could not generate the quiz. Try again.';
+        return;
+      }
+      _accept(next);
     } catch (_) {
       if (!_disposed) {
         error = 'Could not load the quiz. Check your connection and retry.';
